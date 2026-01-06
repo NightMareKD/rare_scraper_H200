@@ -294,10 +294,11 @@ class CaseNormalizer:
     Normalizes raw scraped cases into structured clinical schema.
     """
     
-    def __init__(self, schema_config: Dict[str, Any]):
+    def __init__(self, schema_config: Dict[str, Any], data_root: Path = None):
         self.schema_config = schema_config
         self.extractor = TextExtractor()
-        self.output_dir = Path("data/structured")
+        self.data_root = Path(data_root) if data_root else Path("data")
+        self.output_dir = self.data_root / "structured"
         self.output_dir.mkdir(parents=True, exist_ok=True)
     
     def normalize(self, raw_case: Dict[str, Any]) -> NormalizedCase:
@@ -415,10 +416,11 @@ class NormalizationPipeline:
     Orchestrates the normalization of all raw cases.
     """
     
-    def __init__(self, schema_config: Dict[str, Any], checkpoint_manager):
-        self.normalizer = CaseNormalizer(schema_config)
+    def __init__(self, schema_config: Dict[str, Any], checkpoint_manager, data_root: Path = None):
+        self.data_root = Path(data_root) if data_root else Path("data")
+        self.normalizer = CaseNormalizer(schema_config, data_root=self.data_root)
         self.checkpoint_manager = checkpoint_manager
-        self.raw_dir = Path("data/raw")
+        self.raw_dir = self.data_root / "raw"
     
     def run(self) -> int:
         """

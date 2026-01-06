@@ -21,15 +21,36 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
 from enum import Enum
 
-# Ensure logs directory exists before configuring logging
-Path('logs').mkdir(parents=True, exist_ok=True)
+def get_storage_root() -> Path:
+    """Return persistent storage root (prefers HF Spaces /data when available)."""
+    env_root = os.environ.get("SCRAPER_STORAGE_ROOT")
+    if env_root:
+        return Path(env_root)
+
+    # Hugging Face Spaces persistent storage mount (when enabled)
+    if Path("/data").exists():
+        return Path("/data") / "scraper"
+
+    # Fallback: project directory
+    return Path(".")
+
+
+STORAGE_ROOT = get_storage_root()
+DATA_ROOT = STORAGE_ROOT / "data"
+LOG_ROOT = STORAGE_ROOT / "logs"
+CHECKPOINT_ROOT = STORAGE_ROOT / "checkpoints"
+
+# Ensure directories exist before configuring logging
+LOG_ROOT.mkdir(parents=True, exist_ok=True)
+CHECKPOINT_ROOT.mkdir(parents=True, exist_ok=True)
+DATA_ROOT.mkdir(parents=True, exist_ok=True)
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('logs/ingestion.log'),
+        logging.FileHandler(str(LOG_ROOT / 'ingestion.log')),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -162,8 +183,8 @@ class HardwareDetector:
 class CheckpointManager:
     """Manage pipeline checkpoints for resumability."""
     
-    def __init__(self, checkpoint_dir: str = "checkpoints"):
-        self.checkpoint_dir = Path(checkpoint_dir)
+    def __init__(self, checkpoint_dir: str = None):
+        self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else CHECKPOINT_ROOT
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
     
     def get_processed_ids(self, checkpoint_name: str) -> set:
@@ -216,8 +237,8 @@ class CheckpointManager:
 class AuditLogger:
     """Clinical audit logging for traceability."""
     
-    def __init__(self, log_file: str = "logs/audit.log"):
-        self.log_file = Path(log_file)
+    def __init__(self, log_file: str = None):
+        self.log_file = Path(log_file) if log_file else (LOG_ROOT / "audit.log")
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
     
     def log_similarity_match(
@@ -264,8 +285,8 @@ class AuditLogger:
 class GPUTracker:
     """Track GPU usage to prevent quota exhaustion."""
     
-    def __init__(self, log_file: str = "logs/gpu_usage.log"):
-        self.log_file = Path(log_file)
+    def __init__(self, log_file: str = None):
+        self.log_file = Path(log_file) if log_file else (LOG_ROOT / "gpu_usage.log")
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
         self._start_time: Optional[datetime] = None
     
@@ -320,9 +341,14 @@ class PipelineOrchestrator:
     
     def __init__(self):
         self.config_loader = ConfigLoader()
-        self.checkpoint_manager = CheckpointManager()
-        self.audit_logger = AuditLogger()
-        self.gpu_tracker = GPUTracker()
+        self.storage_root = STORAGE_ROOT
+        self.data_root = DATA_ROOT
+        self.log_root = LOG_ROOT
+        self.checkpoint_root = CHECKPOINT_ROOT
+
+        self.checkpoint_manager = CheckpointManager(str(self.checkpoint_root))
+        self.audit_logger = AuditLogger(str(self.log_root / "audit.log"))
+        self.gpu_tracker = GPUTracker(str(self.log_root / "gpu_usage.log"))
         
         # Ensure directory structure exists
         self._ensure_directories()
@@ -336,19 +362,19 @@ class PipelineOrchestrator:
     def _ensure_directories(self) -> None:
         """Create required directory structure."""
         directories = [
-            "data/raw/pubmed",
-            "data/raw/ncbi",
-            "data/raw/esc",
-            "data/raw/aha",
-            "data/raw/journals",
-            "data/structured",
-            "data/distilled",
-            "data/embeddings",
-            "data/faiss",
-            "checkpoints",
-            "logs",
+            self.data_root / "raw" / "pubmed",
+            self.data_root / "raw" / "ncbi",
+            self.data_root / "raw" / "esc",
+            self.data_root / "raw" / "aha",
+            self.data_root / "raw" / "journals",
+            self.data_root / "structured",
+            self.data_root / "distilled",
+            self.data_root / "embeddings",
+            self.data_root / "faiss",
+            self.checkpoint_root,
+            self.log_root,
         ]
-        
+
         for dir_path in directories:
             Path(dir_path).mkdir(parents=True, exist_ok=True)
         
@@ -394,7 +420,7 @@ class PipelineOrchestrator:
         try:
             # State manager
             self.state_manager = StateManager(
-                checkpoint_dir="checkpoints",
+                checkpoint_dir=str(self.checkpoint_root),
                 gpu_tracker=self.gpu_tracker
             )
             
@@ -407,12 +433,12 @@ class PipelineOrchestrator:
             # Embedding manager
             self.embedding_manager = EmbeddingManager(
                 model_name="sentence-transformers/all-MiniLM-L6-v2",
-                cache_dir="data/embeddings"
+                cache_dir=str(self.data_root / "embeddings")
             )
             
             # FAISS manager
             self.faiss_manager = FAISSIndexManager(
-                index_dir="data/faiss",
+                index_dir=str(self.data_root / "faiss"),
                 dimension=384
             )
             
@@ -425,13 +451,15 @@ class PipelineOrchestrator:
             # Ingestion manager
             self.ingestion_manager = IngestionManager(
                 sources_config=self.sources_config,
-                checkpoint_manager=self.checkpoint_manager
+                checkpoint_manager=self.checkpoint_manager,
+                data_root=self.data_root
             )
             
             # Normalization pipeline
             self.normalization_pipeline = NormalizationPipeline(
                 schema_config=self.schema_config,
-                checkpoint_manager=self.checkpoint_manager
+                checkpoint_manager=self.checkpoint_manager,
+                data_root=self.data_root
             )
             
             logger.info("Core modules initialized successfully")
@@ -582,9 +610,9 @@ class PipelineOrchestrator:
                 
                 # Get cases to process
                 reviewed_ids = self.checkpoint_manager.get_processed_ids("llm_reviewed_ids")
-                structured_dir = Path("data/structured")
-                
-                distilled_dir = Path("data/distilled")
+                structured_dir = self.data_root / "structured"
+
+                distilled_dir = self.data_root / "distilled"
                 distilled_dir.mkdir(parents=True, exist_ok=True)
                 
                 processed = 0
@@ -667,8 +695,8 @@ class PipelineOrchestrator:
                 self.embedding_manager.load_model()
                 
                 embedded_ids = self.checkpoint_manager.get_processed_ids("embedded_ids")
-                distilled_dir = Path("data/distilled")
-                embeddings_dir = Path("data/embeddings")
+                distilled_dir = self.data_root / "distilled"
+                embeddings_dir = self.data_root / "embeddings"
                 embeddings_dir.mkdir(parents=True, exist_ok=True)
                 
                 processed = 0
@@ -681,7 +709,7 @@ class PipelineOrchestrator:
                     
                     try:
                         # Load normalized case
-                        normalized_file = Path("data/structured") / f"{case_id}_normalized.json"
+                        normalized_file = self.data_root / "structured" / f"{case_id}_normalized.json"
                         if not normalized_file.exists():
                             continue
                         
@@ -722,7 +750,7 @@ class PipelineOrchestrator:
         
         if self.faiss_manager is not None:
             try:
-                embeddings_dir = Path("data/embeddings")
+                embeddings_dir = self.data_root / "embeddings"
                 
                 # Load existing index or create new
                 self.faiss_manager.load_index()
@@ -769,6 +797,17 @@ class PipelineOrchestrator:
         
         logger.info("Indexing stage completed")
         return True
+
+    def _ensure_vector_db_initialized(self) -> None:
+        """Ensure a FAISS index file exists in persistent storage."""
+        if self.faiss_manager is None:
+            return
+        try:
+            self.faiss_manager.load_index()
+            # Persist even if empty, so the "vector DB" exists on disk.
+            self.faiss_manager.save_index()
+        except Exception as e:
+            logger.warning(f"Vector DB initialization failed: {e}")
     
     def _run_serving_stage(self) -> bool:
         """Enter serving mode for similarity queries."""
@@ -820,6 +859,9 @@ class PipelineOrchestrator:
         logger.info("=" * 60)
         logger.info("Daily pipeline execution completed")
         logger.info("=" * 60)
+
+        # Always ensure the vector database exists on disk (HF Spaces persistent storage).
+        self._ensure_vector_db_initialized()
 
 
 def create_gradio_interface(orchestrator: PipelineOrchestrator):
@@ -876,7 +918,7 @@ def create_gradio_interface(orchestrator: PipelineOrchestrator):
                         results = []
                         for case_id, distance in similar_ids:
                             # Load case details
-                            case_file = Path("data/structured") / f"{case_id}_normalized.json"
+                            case_file = orchestrator.data_root / "structured" / f"{case_id}_normalized.json"
                             if case_file.exists():
                                 with open(case_file, 'r') as f:
                                     case_data = json.load(f)
@@ -928,6 +970,9 @@ def create_gradio_interface(orchestrator: PipelineOrchestrator):
         reviewed = len(orchestrator.checkpoint_manager.get_processed_ids("llm_reviewed_ids"))
         embedded = len(orchestrator.checkpoint_manager.get_processed_ids("embedded_ids"))
         indexed = len(orchestrator.checkpoint_manager.get_processed_ids("indexed_ids"))
+
+        faiss_index_path = orchestrator.data_root / "faiss" / "combined.index"
+        faiss_meta_path = orchestrator.data_root / "faiss" / "vector_metadata.jsonl"
         
         return json.dumps({
             "execution_mode": mode.value,
@@ -940,6 +985,14 @@ def create_gradio_interface(orchestrator: PipelineOrchestrator):
                 "indexed": indexed,
             },
             "faiss_version": faiss_version,
+            "vector_db": {
+                "storage_root": str(orchestrator.storage_root),
+                "data_root": str(orchestrator.data_root),
+                "faiss_index_path": str(faiss_index_path),
+                "faiss_metadata_path": str(faiss_meta_path),
+                "faiss_index_exists": faiss_index_path.exists(),
+                "faiss_metadata_exists": faiss_meta_path.exists(),
+            },
             "gpu_usage_today_minutes": round(gpu_usage, 2),
             "gpu_quota_minutes": orchestrator.gpu_policy.get("max_gpu_minutes_per_day", 20),
             "gpu_remaining_minutes": round(

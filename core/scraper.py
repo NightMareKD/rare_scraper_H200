@@ -53,13 +53,15 @@ class RateLimiter:
 class BaseScraper:
     """Base class for source scrapers."""
     
-    def __init__(self, config: Dict[str, Any], checkpoint_manager):
+    def __init__(self, config: Dict[str, Any], checkpoint_manager, data_root: Path = None):
         self.config = config
         self.checkpoint_manager = checkpoint_manager
+        self.data_root = Path(data_root) if data_root else Path("data")
         self.rate_limiter = RateLimiter(
             config.get("rate_limit", {}).get("requests_per_second", 0.5)
         )
-        self.output_dir = Path(config.get("output", {}).get("directory", "data/raw"))
+        default_dir = self.data_root / "raw"
+        self.output_dir = Path(config.get("output", {}).get("directory", str(default_dir)))
         self.output_dir.mkdir(parents=True, exist_ok=True)
     
     def scrape(self) -> Generator[ScrapedCase, None, None]:
@@ -95,10 +97,10 @@ class PubMedScraper(BaseScraper):
     
     BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
     
-    def __init__(self, config: Dict[str, Any], checkpoint_manager):
-        super().__init__(config, checkpoint_manager)
+    def __init__(self, config: Dict[str, Any], checkpoint_manager, data_root: Path = None):
+        super().__init__(config, checkpoint_manager, data_root=data_root)
         self.api_key = os.environ.get("NCBI_API_KEY")
-        self.output_dir = Path("data/raw/pubmed")
+        self.output_dir = self.data_root / "raw" / "pubmed"
         self.output_dir.mkdir(parents=True, exist_ok=True)
     
     def scrape(self) -> Generator[ScrapedCase, None, None]:
@@ -226,9 +228,9 @@ class PubMedScraper(BaseScraper):
 class ESCScraper(BaseScraper):
     """Scraper for European Society of Cardiology case gallery."""
     
-    def __init__(self, config: Dict[str, Any], checkpoint_manager):
-        super().__init__(config, checkpoint_manager)
-        self.output_dir = Path("data/raw/esc")
+    def __init__(self, config: Dict[str, Any], checkpoint_manager, data_root: Path = None):
+        super().__init__(config, checkpoint_manager, data_root=data_root)
+        self.output_dir = self.data_root / "raw" / "esc"
         self.output_dir.mkdir(parents=True, exist_ok=True)
     
     def scrape(self) -> Generator[ScrapedCase, None, None]:
@@ -242,9 +244,9 @@ class ESCScraper(BaseScraper):
 class AHAScraper(BaseScraper):
     """Scraper for American Heart Association case reports."""
     
-    def __init__(self, config: Dict[str, Any], checkpoint_manager):
-        super().__init__(config, checkpoint_manager)
-        self.output_dir = Path("data/raw/aha")
+    def __init__(self, config: Dict[str, Any], checkpoint_manager, data_root: Path = None):
+        super().__init__(config, checkpoint_manager, data_root=data_root)
+        self.output_dir = self.data_root / "raw" / "aha"
         self.output_dir.mkdir(parents=True, exist_ok=True)
     
     def scrape(self) -> Generator[ScrapedCase, None, None]:
@@ -258,9 +260,9 @@ class AHAScraper(BaseScraper):
 class JournalScraper(BaseScraper):
     """Scraper for open access journal case reports."""
     
-    def __init__(self, config: Dict[str, Any], checkpoint_manager):
-        super().__init__(config, checkpoint_manager)
-        self.output_dir = Path("data/raw/journals")
+    def __init__(self, config: Dict[str, Any], checkpoint_manager, data_root: Path = None):
+        super().__init__(config, checkpoint_manager, data_root=data_root)
+        self.output_dir = self.data_root / "raw" / "journals"
         self.output_dir.mkdir(parents=True, exist_ok=True)
     
     def scrape(self) -> Generator[ScrapedCase, None, None]:
@@ -286,7 +288,8 @@ class ScraperFactory:
         cls,
         source_name: str,
         config: Dict[str, Any],
-        checkpoint_manager
+        checkpoint_manager,
+        data_root: Path = None
     ) -> Optional[BaseScraper]:
         """Create scraper for given source."""
         scraper_class = cls.SCRAPERS.get(source_name)
@@ -295,7 +298,7 @@ class ScraperFactory:
             logger.warning(f"Unknown source: {source_name}")
             return None
         
-        return scraper_class(config, checkpoint_manager)
+        return scraper_class(config, checkpoint_manager, data_root=data_root)
 
 
 class IngestionManager:
@@ -304,9 +307,10 @@ class IngestionManager:
     Coordinates scraping across all sources.
     """
     
-    def __init__(self, sources_config: Dict[str, Any], checkpoint_manager):
+    def __init__(self, sources_config: Dict[str, Any], checkpoint_manager, data_root: Path = None):
         self.sources_config = sources_config
         self.checkpoint_manager = checkpoint_manager
+        self.data_root = Path(data_root) if data_root else Path("data")
         self.scrapers: Dict[str, BaseScraper] = {}
         
         self._initialize_scrapers()
@@ -320,7 +324,8 @@ class IngestionManager:
                 scraper = ScraperFactory.create(
                     source_name,
                     source_config,
-                    self.checkpoint_manager
+                    self.checkpoint_manager,
+                    data_root=self.data_root
                 )
                 if scraper:
                     self.scrapers[source_name] = scraper
