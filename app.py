@@ -458,7 +458,8 @@ class PipelineOrchestrator:
             self.ingestion_manager = IngestionManager(
                 sources_config=self.sources_config,
                 checkpoint_manager=self.checkpoint_manager,
-                data_root=self.data_root
+                data_root=self.data_root,
+                should_stop=self._stop_event.is_set
             )
             
             # Normalization pipeline
@@ -551,6 +552,61 @@ class PipelineOrchestrator:
             logger.error(f"Stage {stage.value} failed: {e}", exc_info=True)
             return False
     
+    def run_stage_with_progress(self, stage: PipelineStage, mode: ExecutionMode, progress_fn, yield_fn):
+        """
+        Execute a stage with progress tracking for Gradio UI.
+        
+        Args:
+            stage: Pipeline stage to execute
+            mode: Execution mode (CPU/GPU)
+            progress_fn: Gradio progress callback
+            yield_fn: Generator yield function for status updates
+        
+        Returns:
+            True if stage completed successfully
+        """
+        import time
+        
+        if self._stop_event.is_set():
+            yield_fn("❌ Stop requested; skipping stage execution\\n")
+            return False
+        
+        try:
+            if stage == PipelineStage.SCRAPING:
+                return self._run_scraping_stage_with_progress(progress_fn, yield_fn)
+            
+            elif stage == PipelineStage.NORMALIZATION:
+                return self._run_normalization_stage_with_progress(progress_fn, yield_fn)
+            
+            elif stage == PipelineStage.DISTILLATION:
+                if mode == ExecutionMode.CPU_ONLY:
+                    logger.info("Distillation requires GPU, deferring...")
+                    yield_fn("⏭️ Distillation requires GPU, deferring...\\n")
+                    return True
+                return self._run_distillation_stage()
+            
+            elif stage == PipelineStage.EMBEDDING:
+                if mode == ExecutionMode.CPU_ONLY:
+                    logger.info("Embedding requires GPU, deferring...")
+                    yield_fn("⏭️ Embedding requires GPU, deferring...\\n")
+                    return True
+                return self._run_embedding_stage()
+            
+            elif stage == PipelineStage.INDEXING:
+                return self._run_indexing_stage()
+            
+            elif stage == PipelineStage.SERVING:
+                return self._run_serving_stage()
+            
+            else:
+                yield_fn(f"❌ Unknown stage: {stage}\\n")
+                return False
+                
+        except Exception as e:
+            yield_fn(f"❌ Stage {stage.value} failed: {e}\\n")
+            logger.error(f"Stage {stage.value} failed: {e}", exc_info=True)
+            return False
+    
     def _run_scraping_stage(self) -> bool:
         """Execute scraping stage (CPU-safe)."""
         logger.info("=== SCRAPING STAGE ===")
@@ -560,7 +616,7 @@ class PipelineOrchestrator:
 
         if self.ingestion_manager is not None:
             try:
-                scraped_count = self.ingestion_manager.run_ingestion(max_cases_per_source=2000)
+                scraped_count = self.ingestion_manager.run_ingestion(max_cases_per_source=10000)
                 logger.info(f"Scraped {scraped_count} new cases")
             except Exception as e:
                 logger.error(f"Ingestion failed: {e}")
@@ -579,6 +635,31 @@ class PipelineOrchestrator:
         
         logger.info("Scraping stage completed")
         return True
+    
+    def _run_scraping_stage_with_progress(self, progress_fn, yield_fn) -> bool:
+        """Execute scraping stage with live progress updates."""
+        import time
+        
+        if self._stop_event.is_set():
+            return False
+
+        if self.ingestion_manager is not None:
+            try:
+                max_cases = self.ingestion_manager.max_cases_per_source
+                yield_fn(f"🔍 Starting scraping: targeting {max_cases:,} cases per source\\n\\n")
+                
+                start_time = time.time()
+                last_progress_msg = ""
+                
+                def progress_callback(source_name, current, total, rate, eta):
+                    \"\"\"Called by ingestion manager with progress updates.\"\"\"
+                    nonlocal last_progress_msg
+                    progress_pct = current / total if total > 0 else 0
+                    progress_fn(progress_pct, desc=f\"{source_name}: {current}/{total}\")
+                    
+                    # Format ETA
+                    eta_str = f\"{int(eta//60)}m {int(eta%60)}s\" if eta < 3600 else f\"{eta/3600:.1f}h\"
+                    msg = f\"📊 {source_name}: {current:,}/{total:,} cases | {rate:.1f} cases/sec | ETA: {eta_str}\"\n                    \n                    # Only yield if message changed (avoid spam)\n                    if msg != last_progress_msg:\n                        yield_fn(f\"\\r{msg}\")\n                        last_progress_msg = msg\n                \n                # Attach progress callback\n                self.ingestion_manager.progress_callback = progress_callback\n                \n                scraped_count = self.ingestion_manager.run_ingestion(max_cases_per_source=max_cases)\n                \n                elapsed = time.time() - start_time\n                yield_fn(f\"\\n\\n✅ Scraping complete: {scraped_count:,} cases in {elapsed:.1f}s ({scraped_count/elapsed:.1f} cases/sec)\\n\")\n                \n                logger.info(f\"Scraped {scraped_count} new cases\")\n                return True\n            except Exception as e:\n                yield_fn(f\"\\n❌ Ingestion failed: {e}\\n\")\n                logger.error(f\"Ingestion failed: {e}\")\n                return False\n            finally:\n                # Remove callback\n                self.ingestion_manager.progress_callback = None\n        else:\n            yield_fn(\"⚠️ Ingestion manager not available\\n\")\n            return False
     
     def _run_normalization_stage(self) -> bool:
         """Execute normalization stage (CPU-safe)."""
@@ -601,6 +682,33 @@ class PipelineOrchestrator:
         
         logger.info("Normalization stage completed")
         return True
+    
+    def _run_normalization_stage_with_progress(self, progress_fn, yield_fn) -> bool:
+        """Execute normalization stage with live progress updates."""
+        import time
+        
+        if self._stop_event.is_set():
+            return False
+
+        if self.normalization_pipeline is not None:
+            try:
+                yield_fn(f"📝 Starting normalization...\\n")
+                start_time = time.time()
+                
+                normalized_count = self.normalization_pipeline.run()
+                
+                elapsed = time.time() - start_time
+                yield_fn(f"✅ Normalized {normalized_count:,} cases in {elapsed:.1f}s\\n")
+                
+                logger.info(f"Normalized {normalized_count} cases")
+                return True
+            except Exception as e:
+                yield_fn(f"❌ Normalization failed: {e}\\n")
+                logger.error(f"Normalization failed: {e}")
+                return False
+        else:
+            yield_fn("⚠️ Normalization pipeline not available\\n")
+            return False
     
     def _run_distillation_stage(self) -> bool:
         """Execute LLM distillation stage (GPU required)."""
@@ -1063,13 +1171,66 @@ def create_gradio_interface(orchestrator: PipelineOrchestrator):
             )
         }, indent=2)
 
-    def start_pipeline() -> str:
-        started = orchestrator.start_pipeline_async()
-        return json.dumps({
-            "started": started,
-            "pipeline_running": orchestrator.is_pipeline_running(),
-            "storage_root": str(orchestrator.storage_root),
-        }, indent=2)
+    def start_pipeline(progress=gr.Progress()):
+        """Start pipeline with blocking execution and progress updates."""
+        import time
+        
+        if orchestrator.is_pipeline_running():
+            yield "Pipeline already running"
+            return
+        
+        orchestrator._stop_event.clear()
+        
+        try:
+            # Get current stage
+            current_stage = orchestrator.get_current_stage()
+            mode = orchestrator.detect_execution_mode()
+            
+            progress(0, desc=f"Starting {current_stage.value} stage...")
+            yield f"🚀 Starting pipeline in {mode.value} mode\nCurrent stage: {current_stage.value}\n"
+            
+            stages_to_run = [
+                PipelineStage.SCRAPING,
+                PipelineStage.NORMALIZATION,
+                PipelineStage.DISTILLATION,
+                PipelineStage.EMBEDDING,
+                PipelineStage.INDEXING
+            ]
+            
+            total_stages = len(stages_to_run)
+            
+            for idx, stage in enumerate(stages_to_run):
+                if orchestrator._stop_event.is_set():
+                    yield f"\n⛔ Pipeline stopped by user at stage {stage.value}"
+                    break
+                
+                stage_progress = idx / total_stages
+                progress(stage_progress, desc=f"Running {stage.value}...")
+                yield f"\n▶️ Starting stage: {stage.value}\n"
+                
+                # Execute stage with progress callback
+                success = orchestrator.run_stage_with_progress(stage, mode, progress, yield)
+                
+                if success:
+                    yield f"✅ Stage {stage.value} completed\n"
+                else:
+                    if stage == PipelineStage.DISTILLATION and mode == ExecutionMode.CPU_ONLY:
+                        yield f"⏭️ Stage {stage.value} deferred (requires GPU)\n"
+                    else:
+                        yield f"❌ Stage {stage.value} failed\n"
+                        break
+            
+            # Ensure vector DB exists
+            progress(0.95, desc="Finalizing vector database...")
+            yield "\n🔧 Ensuring vector database is initialized...\n"
+            orchestrator._ensure_vector_db_initialized()
+            
+            progress(1.0, desc="Pipeline complete!")
+            yield "\n✅ Pipeline execution completed!\n"
+            
+        except Exception as e:
+            yield f"\n❌ Pipeline error: {e}\n"
+            logger.error(f"Pipeline execution failed: {e}", exc_info=True)
 
     def stop_pipeline() -> str:
         orchestrator.request_stop()
@@ -1078,18 +1239,29 @@ def create_gradio_interface(orchestrator: PipelineOrchestrator):
             "pipeline_running": orchestrator.is_pipeline_running(),
         }, indent=2)
 
-    def run_stage_now(stage_name: str, max_cases_per_source: int) -> str:
+    def run_stage_now(stage_name: str, max_cases_per_source: int, progress=gr.Progress()):
+        """Run a single stage with progress tracking."""
         # Allow the UI to tune ingestion volume for SCRAPING.
         if orchestrator.ingestion_manager is not None:
             orchestrator.ingestion_manager.max_cases_per_source = max_cases_per_source
 
         stage = PipelineStage(stage_name)
-        ok = orchestrator.run_single_stage(stage)
+        mode = orchestrator.detect_execution_mode()
+        
+        progress(0, desc=f"Starting {stage.value}...")
+        yield f"▶️ Running stage: {stage.value}\n"
+        
+        ok = orchestrator.run_stage_with_progress(stage, mode, progress, yield)
+        
+        progress(0.9, desc="Finalizing...")
         orchestrator._ensure_vector_db_initialized()
-        return json.dumps({
-            "stage": stage.value,
-            "success": ok,
-        }, indent=2)
+        
+        progress(1.0, desc="Complete!")
+        
+        if ok:
+            yield f"\n✅ Stage {stage.value} completed successfully"
+        else:
+            yield f"\n❌ Stage {stage.value} failed"
     
     # Build Gradio interface
     with gr.Blocks(title="Clinical Case Similarity System") as interface:
@@ -1169,7 +1341,7 @@ def create_gradio_interface(orchestrator: PipelineOrchestrator):
                 start_btn = gr.Button("▶ Start Pipeline", variant="primary")
                 stop_btn = gr.Button("■ Stop", variant="stop")
 
-            control_out = gr.Textbox(label="Control Output", lines=6, interactive=False)
+            control_out = gr.Textbox(label="Pipeline Progress", lines=15, interactive=False)
             start_btn.click(fn=start_pipeline, outputs=control_out)
             stop_btn.click(fn=stop_pipeline, outputs=control_out)
 
@@ -1179,7 +1351,7 @@ def create_gradio_interface(orchestrator: PipelineOrchestrator):
                 value=PipelineStage.SCRAPING.value,
                 label="Stage"
             )
-            max_cases = gr.Number(value=2000, precision=0, label="Max cases per source (scraping)")
+            max_cases = gr.Number(value=10000, precision=0, label="Max cases per source (scraping)")
             run_stage_btn = gr.Button("Run Stage Now")
             run_stage_btn.click(
                 fn=run_stage_now,
@@ -1210,15 +1382,7 @@ def main():
             # Create and launch Gradio interface
             interface = create_gradio_interface(orchestrator)
             if interface:
-                # Run pipeline in background
-                import threading
-                pipeline_thread = threading.Thread(
-                    target=orchestrator.run_daily_pipeline,
-                    daemon=True
-                )
-                pipeline_thread.start()
-                
-                # Launch Gradio
+                # Launch Gradio (manual pipeline start only)
                 interface.launch(server_name="0.0.0.0", server_port=7860)
             else:
                 logger.error("Failed to create Gradio interface")
