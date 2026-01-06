@@ -108,11 +108,43 @@ python app.py
 
 ### Hugging Face Spaces Deployment
 
-1. Create a new Space on Hugging Face
-2. Upload all files maintaining directory structure
-3. Configure persistent storage for `/data` directory
-4. Set environment variables as needed
-5. The system will auto-detect GPU availability
+This repo is designed to run as a **Gradio** Hugging Face Space with a persistent on-disk vector database.
+
+#### 1) Space settings
+
+1. Create a new Space
+    - **SDK**: `Gradio`
+    - **Repository**: this project (keep `app.py` at the repo root)
+2. In Space **Settings → Hardware**
+    - Select a GPU if you want distillation/embedding stages to run.
+3. In Space **Settings → Persistent Storage**
+    - Enable persistent storage.
+    - Hugging Face mounts persistent storage at `/data`.
+
+#### 2) Environment variables / Secrets
+
+Set these in **Settings → Variables and secrets**:
+
+| Name | Type | Required | Purpose |
+|------|------|----------|---------|
+| `NCBI_API_KEY` | Secret | No | Higher PubMed E-utilities quota (recommended for scraping at scale). |
+| `SCRAPER_STORAGE_ROOT` | Variable | No | Overrides storage root. Default is `/data/scraper` on Spaces when `/data` exists. |
+
+#### 3) Persistent vector DB location (CRITICAL)
+
+The "vector database" is a persisted FAISS index written to Hugging Face persistent storage.
+
+- Persistent storage root (default): `/data/scraper`
+- FAISS index file: `/data/scraper/data/faiss/combined.index`
+- FAISS metadata file: `/data/scraper/data/faiss/vector_metadata.jsonl`
+
+The pipeline **always** initializes and writes the FAISS index file at the end of a run (even if it is empty), so you can rely on the database existing.
+
+#### 4) How to confirm it worked
+
+Open the Space → **System Status** tab and verify:
+- `vector_db.faiss_index_exists` is `true`
+- `vector_db.faiss_index_path` points to `/data/.../combined.index`
 
 ---
 
@@ -171,6 +203,15 @@ Cases are flagged when composite score exceeds configured threshold.
 ├── logs/                 # System logs
 └── docs/                 # Documentation
 ```
+
+### Note on Hugging Face persistent storage
+
+When running on Hugging Face Spaces with Persistent Storage enabled, the app automatically writes to:
+- `/data/scraper/data/...`
+- `/data/scraper/checkpoints/...`
+- `/data/scraper/logs/...`
+
+Locally (or if `/data` is not available), it falls back to the repo directories.
 
 ---
 

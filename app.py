@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
 from enum import Enum
+import threading
 
 def get_storage_root() -> Path:
     """Return persistent storage root (prefers HF Spaces /data when available)."""
@@ -349,6 +350,11 @@ class PipelineOrchestrator:
         self.checkpoint_manager = CheckpointManager(str(self.checkpoint_root))
         self.audit_logger = AuditLogger(str(self.log_root / "audit.log"))
         self.gpu_tracker = GPUTracker(str(self.log_root / "gpu_usage.log"))
+
+        # Pipeline control primitives (for UI)
+        self._pipeline_lock = threading.Lock()
+        self._pipeline_thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
         
         # Ensure directory structure exists
         self._ensure_directories()
@@ -507,6 +513,10 @@ class PipelineOrchestrator:
         Returns True if stage completed successfully.
         """
         logger.info(f"Starting stage: {stage.value} in {mode.value} mode")
+
+        if self._stop_event.is_set():
+            logger.info("Stop requested; skipping stage execution")
+            return False
         
         try:
             if stage == PipelineStage.SCRAPING:
@@ -545,6 +555,9 @@ class PipelineOrchestrator:
         """Execute scraping stage (CPU-safe)."""
         logger.info("=== SCRAPING STAGE ===")
         
+        if self._stop_event.is_set():
+            return False
+
         if self.ingestion_manager is not None:
             try:
                 scraped_count = self.ingestion_manager.run_ingestion(max_cases_per_source=2000)
@@ -571,6 +584,9 @@ class PipelineOrchestrator:
         """Execute normalization stage (CPU-safe)."""
         logger.info("=== NORMALIZATION STAGE ===")
         
+        if self._stop_event.is_set():
+            return False
+
         if self.normalization_pipeline is not None:
             try:
                 normalized_count = self.normalization_pipeline.run()
@@ -599,6 +615,9 @@ class PipelineOrchestrator:
         if current_usage >= max_minutes:
             logger.warning(f"GPU quota exhausted: {current_usage:.1f}/{max_minutes} min")
             return False
+
+        if self._stop_event.is_set():
+            return False
         
         self.gpu_tracker.start_session()
         
@@ -619,6 +638,9 @@ class PipelineOrchestrator:
                 start_time = time.time()
                 
                 for case_file in structured_dir.glob("*_normalized.json"):
+                    if self._stop_event.is_set():
+                        logger.info("Stop requested; ending distillation loop")
+                        break
                     # Check time budget (15 min for distillation)
                     elapsed = (time.time() - start_time) / 60
                     if elapsed >= distill_budget:
@@ -686,6 +708,9 @@ class PipelineOrchestrator:
         if current_usage >= max_minutes:
             logger.warning(f"GPU quota exhausted: {current_usage:.1f}/{max_minutes} min")
             return False
+
+        if self._stop_event.is_set():
+            return False
         
         self.gpu_tracker.start_session()
         
@@ -702,6 +727,9 @@ class PipelineOrchestrator:
                 processed = 0
                 
                 for distilled_file in distilled_dir.glob("*_distilled.json"):
+                    if self._stop_event.is_set():
+                        logger.info("Stop requested; ending embedding loop")
+                        break
                     case_id = distilled_file.stem.replace("_distilled", "")
                     
                     if case_id in embedded_ids:
@@ -748,6 +776,9 @@ class PipelineOrchestrator:
         """Execute FAISS indexing stage (CPU or GPU)."""
         logger.info("=== INDEXING STAGE ===")
         
+        if self._stop_event.is_set():
+            return False
+
         if self.faiss_manager is not None:
             try:
                 embeddings_dir = self.data_root / "embeddings"
@@ -761,6 +792,9 @@ class PipelineOrchestrator:
                 import numpy as np
                 
                 for emb_file in embeddings_dir.glob("*_embeddings.npz"):
+                    if self._stop_event.is_set():
+                        logger.info("Stop requested; ending indexing loop")
+                        break
                     case_id = emb_file.stem.replace("_embeddings", "")
                     
                     if case_id in indexed_ids:
@@ -808,6 +842,31 @@ class PipelineOrchestrator:
             self.faiss_manager.save_index()
         except Exception as e:
             logger.warning(f"Vector DB initialization failed: {e}")
+
+    def start_pipeline_async(self) -> bool:
+        """Start the daily pipeline in a background thread (used by UI)."""
+        with self._pipeline_lock:
+            if self._pipeline_thread is not None and self._pipeline_thread.is_alive():
+                return False
+
+            self._stop_event.clear()
+            self._pipeline_thread = threading.Thread(target=self.run_daily_pipeline, daemon=True)
+            self._pipeline_thread.start()
+            return True
+
+    def request_stop(self) -> None:
+        """Request the pipeline to stop as soon as practical."""
+        self._stop_event.set()
+
+    def is_pipeline_running(self) -> bool:
+        """Return True if the background pipeline thread is alive."""
+        t = self._pipeline_thread
+        return bool(t and t.is_alive())
+
+    def run_single_stage(self, stage: PipelineStage) -> bool:
+        """Run a single stage immediately (synchronously), respecting execution mode."""
+        mode = HardwareDetector.get_execution_mode(self.gpu_policy)
+        return self.run_stage(stage, mode)
     
     def _run_serving_stage(self) -> bool:
         """Enter serving mode for similarity queries."""
@@ -993,11 +1052,43 @@ def create_gradio_interface(orchestrator: PipelineOrchestrator):
                 "faiss_index_exists": faiss_index_path.exists(),
                 "faiss_metadata_exists": faiss_meta_path.exists(),
             },
+            "controls": {
+                "pipeline_running": orchestrator.is_pipeline_running(),
+                "stop_requested": orchestrator._stop_event.is_set(),
+            },
             "gpu_usage_today_minutes": round(gpu_usage, 2),
             "gpu_quota_minutes": orchestrator.gpu_policy.get("max_gpu_minutes_per_day", 20),
             "gpu_remaining_minutes": round(
                 orchestrator.gpu_policy.get("max_gpu_minutes_per_day", 20) - gpu_usage, 2
             )
+        }, indent=2)
+
+    def start_pipeline() -> str:
+        started = orchestrator.start_pipeline_async()
+        return json.dumps({
+            "started": started,
+            "pipeline_running": orchestrator.is_pipeline_running(),
+            "storage_root": str(orchestrator.storage_root),
+        }, indent=2)
+
+    def stop_pipeline() -> str:
+        orchestrator.request_stop()
+        return json.dumps({
+            "stop_requested": True,
+            "pipeline_running": orchestrator.is_pipeline_running(),
+        }, indent=2)
+
+    def run_stage_now(stage_name: str, max_cases_per_source: int) -> str:
+        # Allow the UI to tune ingestion volume for SCRAPING.
+        if orchestrator.ingestion_manager is not None:
+            orchestrator.ingestion_manager.max_cases_per_source = max_cases_per_source
+
+        stage = PipelineStage(stage_name)
+        ok = orchestrator.run_single_stage(stage)
+        orchestrator._ensure_vector_db_initialized()
+        return json.dumps({
+            "stage": stage.value,
+            "success": ok,
         }, indent=2)
     
     # Build Gradio interface
@@ -1064,6 +1155,37 @@ def create_gradio_interface(orchestrator: PipelineOrchestrator):
             )
             refresh_btn = gr.Button("🔄 Refresh Status")
             refresh_btn.click(fn=get_system_status, outputs=status_output)
+
+        with gr.Tab("Controls"):
+            gr.Markdown("""
+            Control the ingestion/processing pipeline.
+
+            - **Start Pipeline** runs the full daily pipeline in the background.
+            - **Stop** requests a graceful stop between loops/stages.
+            - **Run Stage Now** executes a single stage immediately.
+            """)
+
+            with gr.Row():
+                start_btn = gr.Button("▶ Start Pipeline", variant="primary")
+                stop_btn = gr.Button("■ Stop", variant="stop")
+
+            control_out = gr.Textbox(label="Control Output", lines=6, interactive=False)
+            start_btn.click(fn=start_pipeline, outputs=control_out)
+            stop_btn.click(fn=stop_pipeline, outputs=control_out)
+
+            gr.Markdown("### Run one stage")
+            stage_select = gr.Dropdown(
+                choices=[s.value for s in PipelineStage if s not in [PipelineStage.IDLE]],
+                value=PipelineStage.SCRAPING.value,
+                label="Stage"
+            )
+            max_cases = gr.Number(value=2000, precision=0, label="Max cases per source (scraping)")
+            run_stage_btn = gr.Button("Run Stage Now")
+            run_stage_btn.click(
+                fn=run_stage_now,
+                inputs=[stage_select, max_cases],
+                outputs=control_out
+            )
     
     return interface
 

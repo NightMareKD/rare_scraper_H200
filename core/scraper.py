@@ -312,6 +312,9 @@ class IngestionManager:
         self.checkpoint_manager = checkpoint_manager
         self.data_root = Path(data_root) if data_root else Path("data")
         self.scrapers: Dict[str, BaseScraper] = {}
+
+        # Optional UI-tunable limit
+        self.max_cases_per_source: int = 1000
         
         self._initialize_scrapers()
     
@@ -331,11 +334,13 @@ class IngestionManager:
                     self.scrapers[source_name] = scraper
                     logger.info(f"Initialized scraper: {source_name}")
     
-    def run_ingestion(self, max_cases_per_source: int = 1000) -> int:
+    def run_ingestion(self, max_cases_per_source: int = None) -> int:
         """
         Run ingestion across all sources.
         Returns total number of cases scraped.
         """
+        if max_cases_per_source is None:
+            max_cases_per_source = self.max_cases_per_source
         total_scraped = 0
         
         for source_name, scraper in self.scrapers.items():
