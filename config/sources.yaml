@@ -1,0 +1,265 @@
+# ==========================================
+# Data Sources Configuration
+# ==========================================
+# This file defines LEGAL boundaries for data collection.
+# Only publicly available, open-access sources are permitted.
+# ==========================================
+
+version: "1.0"
+last_updated: "2026-01-05"
+
+# Global scraping settings
+global_settings:
+  # Rate limiting (requests per second)
+  requests_per_second: 0.5
+  
+  # Delay between sources (seconds)
+  source_delay: 30
+  
+  # Maximum retries per request
+  max_retries: 3
+  
+  # Retry backoff multiplier
+  retry_backoff: 2.0
+  
+  # User agent rotation
+  rotate_user_agent: true
+  
+  # Respect robots.txt
+  respect_robots_txt: true
+  
+  # Maximum concurrent requests
+  max_concurrent: 2
+
+# Data sources
+sources:
+  # ==========================================
+  # PubMed Central (Open Access)
+  # ==========================================
+  pubmed:
+    enabled: true
+    name: "PubMed Central"
+    description: "NIH open access biomedical literature"
+    base_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+    
+    # API configuration
+    api:
+      use_api: true
+      api_key_env: "NCBI_API_KEY"  # Optional, increases rate limit
+      
+    # Search parameters
+    search:
+      database: "pmc"
+      query_terms:
+        - "case report[pt]"
+        - "rare disease[mh]"
+        - "cardiac[mh] AND case report[pt]"
+        - "arrhythmia[mh] AND case report[pt]"
+        - "cardiomyopathy[mh] AND case report[pt]"
+      
+      # Filters
+      filters:
+        open_access: true
+        has_abstract: true
+        publication_types:
+          - "Case Reports"
+        date_range:
+          start: "2010/01/01"
+          end: "2025/12/31"
+        languages:
+          - "eng"
+    
+    # Output settings
+    output:
+      directory: "data/raw/pubmed"
+      format: "xml"
+      include_full_text: true
+      include_supplementary: false
+    
+    # Rate limits
+    rate_limit:
+      requests_per_second: 3  # Higher with API key
+      daily_limit: 10000
+
+  # ==========================================
+  # NCBI Gene/OMIM (Disease Genetics)
+  # ==========================================
+  ncbi:
+    enabled: true
+    name: "NCBI Gene Database"
+    description: "Genetic disease information"
+    base_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+    
+    api:
+      use_api: true
+      api_key_env: "NCBI_API_KEY"
+    
+    search:
+      database: "gene"
+      query_terms:
+        - "cardiac disease[disease]"
+        - "rare genetic disorder[disease]"
+        - "inherited arrhythmia[disease]"
+      
+    output:
+      directory: "data/raw/ncbi"
+      format: "json"
+    
+    rate_limit:
+      requests_per_second: 3
+      daily_limit: 5000
+
+  # ==========================================
+  # European Society of Cardiology (ESC)
+  # ==========================================
+  esc:
+    enabled: true
+    name: "ESC Case Gallery"
+    description: "European Society of Cardiology clinical cases"
+    base_url: "https://www.escardio.org"
+    
+    # Web scraping (no API)
+    scraping:
+      start_urls:
+        - "/Education/Practice-Tools/Case-of-the-month"
+        - "/Education/E-Learning/Clinical-Case-Gallery"
+      
+      # CSS selectors for content extraction
+      selectors:
+        title: ".case-title, h1.title"
+        content: ".case-content, .article-body"
+        metadata: ".case-meta, .article-info"
+        
+      # Pagination
+      pagination:
+        type: "page_number"
+        param: "page"
+        max_pages: 100
+    
+    output:
+      directory: "data/raw/esc"
+      format: "json"
+    
+    rate_limit:
+      requests_per_second: 0.2
+      daily_limit: 500
+
+  # ==========================================
+  # American Heart Association (AHA)
+  # ==========================================
+  aha:
+    enabled: true
+    name: "AHA Case Reports"
+    description: "American Heart Association clinical cases"
+    base_url: "https://www.ahajournals.org"
+    
+    scraping:
+      start_urls:
+        - "/journal/circep/case-reports"
+        - "/journal/circ/case-reports"
+      
+      selectors:
+        title: "h1.article-title"
+        abstract: ".abstractSection"
+        content: ".article-body"
+        
+      # Only open access content
+      filters:
+        open_access_only: true
+    
+    output:
+      directory: "data/raw/aha"
+      format: "json"
+    
+    rate_limit:
+      requests_per_second: 0.1
+      daily_limit: 200
+
+  # ==========================================
+  # Open Access Journals
+  # ==========================================
+  journals:
+    enabled: true
+    name: "Open Access Journals"
+    description: "Various open access medical journals"
+    
+    # List of journal sources
+    journal_list:
+      - name: "BMJ Case Reports"
+        base_url: "https://casereports.bmj.com"
+        open_access: true
+        enabled: true
+        
+      - name: "JACC Case Reports"
+        base_url: "https://www.jacc.org/journal/case-reports"
+        open_access: true
+        enabled: true
+        
+      - name: "Oxford Medical Case Reports"
+        base_url: "https://academic.oup.com/omcr"
+        open_access: true
+        enabled: true
+        
+      - name: "Cureus"
+        base_url: "https://www.cureus.com"
+        open_access: true
+        enabled: true
+    
+    output:
+      directory: "data/raw/journals"
+      format: "json"
+    
+    rate_limit:
+      requests_per_second: 0.2
+      daily_limit: 1000
+
+# ==========================================
+# Legal & Ethical Guidelines
+# ==========================================
+legal:
+  # Only scrape content that is:
+  permitted_content:
+    - "Open access publications"
+    - "Creative Commons licensed content"
+    - "Public domain materials"
+    - "Content with explicit research use permission"
+  
+  # Never scrape:
+  prohibited_content:
+    - "Paywalled content"
+    - "Patient-identifiable information"
+    - "Copyrighted materials without permission"
+    - "Content behind authentication"
+  
+  # Attribution requirements
+  attribution:
+    store_source_url: true
+    store_doi: true
+    store_license: true
+    store_access_date: true
+
+# ==========================================
+# Data Quality Settings
+# ==========================================
+quality:
+  # Minimum content requirements
+  minimum_requirements:
+    min_word_count: 200
+    required_sections:
+      - "case presentation"
+      - "discussion"
+    
+  # Duplicate detection
+  deduplication:
+    enabled: true
+    method: "doi_and_title_hash"
+    similarity_threshold: 0.95
+
+# ==========================================
+# Scheduling
+# ==========================================
+schedule:
+  # Run ingestion daily
+  frequency: "daily"
+  preferred_time: "02:00"  # UTC
+  max_duration_hours: 4

@@ -1,0 +1,251 @@
+# ==========================================
+# Similarity Engine Configuration (FINAL)
+# ==========================================
+# Defines EXACTLY how patient similarity is computed.
+# These rules are LOCKED.
+# ==========================================
+
+version: "1.0"
+last_updated: "2026-01-06"
+engine_locked: true
+
+# ==========================================
+# Input Contract (REQUIRED)
+# ==========================================
+# Patient data MUST be normalized into these domains.
+# Unstructured input is REJECTED.
+
+input_contract:
+  required_domains:
+    symptoms:
+      required: true
+      min_length: 10
+      description: "Clinical presentation text"
+      
+    ecg:
+      required: true
+      min_length: 5
+      description: "ECG findings text"
+      
+    labs:
+      required: true
+      min_length: 5
+      description: "Laboratory values text"
+      
+    demographics:
+      required: true
+      min_length: 5
+      description: "Age, sex, history text"
+      
+    imaging:
+      required: false  # Optional
+      min_length: 0
+      description: "Imaging findings text"
+      
+  rejection_policy:
+    on_missing_required: "REJECT with error message"
+    on_invalid_format: "REJECT with validation errors"
+    on_empty_input: "REJECT - no data provided"
+
+# ==========================================
+# Similarity Computation (LOCKED)
+# ==========================================
+# This is the EXACT algorithm. No deviations.
+
+computation_pipeline:
+  step_1:
+    name: "Embed per domain"
+    description: "Generate embedding for each patient domain"
+    model: "sentence-transformers/all-MiniLM-L6-v2"
+    normalize: true
+    
+  step_2:
+    name: "Query matching FAISS index"
+    description: "Search each domain's FAISS index independently"
+    k: 50  # Top 50 per domain
+    metric: "cosine_similarity"
+    
+  step_3:
+    name: "Normalize similarity"
+    description: "Ensure similarity scores are in [0, 1] range"
+    method: "min_max_normalization"
+    
+  step_4:
+    name: "Apply clinical non-linear scaling"
+    description: "Boost high similarities, suppress noise"
+    function: "sigmoid_scaling"
+    parameters:
+      midpoint: 0.5
+      steepness: 10
+      
+  step_5:
+    name: "Apply domain weights"
+    description: "Weight each domain by clinical importance"
+    weights:
+      symptoms: 0.30
+      ecg: 0.25
+      labs: 0.25
+      demographics: 0.10
+      imaging: 0.10
+      
+  step_6:
+    name: "Require multi-domain match"
+    description: "Must have ≥2 domains above minimum threshold"
+    min_domains_above_threshold: 2
+    domain_minimum_threshold: 0.40
+    
+  step_7:
+    name: "Compute composite score"
+    description: "Weighted sum of domain similarities"
+    formula: "Σ(weight[i] × similarity[i])"
+
+# ==========================================
+# Flag Rule (FINAL)
+# ==========================================
+# A patient is flagged ONLY IF ALL conditions are met.
+
+flag_rule:
+  conditions:
+    # Condition 1: Composite threshold
+    composite_threshold:
+      operator: ">="
+      value: 0.50
+      description: "Composite similarity must be at least 50%"
+      
+    # Condition 2: Critical domain match
+    critical_domain_match:
+      operator: "OR"
+      domains:
+        - domain: "ecg"
+          threshold: 0.45
+        - domain: "symptoms"
+          threshold: 0.45
+      description: "ECG OR Symptoms must exceed domain threshold"
+      
+    # Condition 3: Multi-domain support
+    multi_domain_support:
+      min_domains: 2
+      min_score: 0.40
+      description: "At least 2 domains must be above minimum score"
+      
+  logic: "condition_1 AND condition_2 AND condition_3"
+  
+  # If ANY condition fails
+  no_flag_action: "Return empty result with explanation"
+
+# ==========================================
+# Output Contract (EXPLAINABLE ONLY)
+# ==========================================
+# Every flag returns these fields. No silent decisions.
+
+output_contract:
+  flagged_output:
+    required_fields:
+      - field: "is_flagged"
+        type: "boolean"
+        value: true
+        
+      - field: "composite_score"
+        type: "float"
+        range: [0.0, 1.0]
+        
+      - field: "matched_cases"
+        type: "list"
+        max_items: 10
+        item_schema:
+          case_id: "string"
+          source_url: "string"
+          rare_explanation: "string"
+          similarity_score: "float"
+          
+      - field: "domain_scores"
+        type: "object"
+        schema:
+          symptoms: "float"
+          ecg: "float"
+          labs: "float"
+          demographics: "float"
+          imaging: "float"
+          
+      - field: "clinical_rationale"
+        type: "string"
+        max_length: 500
+        description: "Human-readable explanation"
+        
+      - field: "source_references"
+        type: "list"
+        description: "Original publication links"
+        
+      - field: "disclaimer"
+        type: "string"
+        value: "This is clinical decision SUPPORT only. Not for diagnosis."
+
+  not_flagged_output:
+    required_fields:
+      - field: "is_flagged"
+        type: "boolean"
+        value: false
+        
+      - field: "reason"
+        type: "string"
+        description: "Why no flag was raised"
+        
+      - field: "highest_similarity"
+        type: "float"
+        description: "Best match score (for transparency)"
+        
+      - field: "disclaimer"
+        type: "string"
+        value: "This is clinical decision SUPPORT only. Not for diagnosis."
+
+# ==========================================
+# Non-Linear Scaling Function
+# ==========================================
+
+nonlinear_scaling:
+  # Sigmoid scaling to boost high similarities
+  function: |
+    def sigmoid_scale(x, midpoint=0.5, steepness=10):
+        return 1 / (1 + exp(-steepness * (x - midpoint)))
+        
+  # Effect:
+  # - Scores below 0.3: Suppressed to near 0
+  # - Scores 0.4-0.6: Moderate boost
+  # - Scores above 0.7: Boosted to near 1
+  
+  # Rationale:
+  # Clinical similarity should have clear separation between
+  # "not similar" and "clinically relevant similarity"
+
+# ==========================================
+# Query Logging
+# ==========================================
+
+query_logging:
+  log_file: "logs/similarity.log"
+  
+  logged_fields:
+    - query_timestamp
+    - query_id
+    - input_domains_provided
+    - composite_score
+    - domain_scores
+    - is_flagged
+    - num_matches_returned
+    - query_latency_ms
+    
+  audit_log_entry:
+    enabled: true
+    destination: "logs/audit.log"
+    format: "jsonl"
+
+# ==========================================
+# Performance Targets
+# ==========================================
+
+performance:
+  max_query_latency_ms: 500
+  target_query_latency_ms: 200
+  
+  # If latency exceeds max
+  latency_exceeded_action: "Log warning, continue serving"

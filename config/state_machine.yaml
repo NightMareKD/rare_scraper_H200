@@ -1,0 +1,166 @@
+# ==========================================
+# System State Machine Configuration
+# ==========================================
+# Defines the EXHAUSTIVE state machine for Space execution.
+# NO OTHER STATES EXIST beyond those defined here.
+# ==========================================
+
+version: "1.0"
+last_updated: "2026-01-06"
+
+# ==========================================
+# System Identity (FIXED - IMMUTABLE)
+# ==========================================
+system_identity:
+  type: "Clinical Decision Support"
+  purpose: "Rare Cardiology Pattern Flagging"
+  not_for:
+    - "Diagnosis"
+    - "Prognosis"
+    - "Autonomous decision making"
+    - "Patient-facing alerts"
+  platform: "Hugging Face Space"
+
+# ==========================================
+# Exhaustive State Definitions
+# ==========================================
+# The Space can ONLY be in one of these states.
+# No other state exists.
+
+states:
+  INIT:
+    description: "First boot initialization"
+    trigger: "Space startup with no prior state"
+    allowed_actions:
+      - "Create directory structure"
+      - "Initialize checkpoints"
+      - "Validate configurations"
+      - "Setup logging"
+    next_state: "CPU_INGEST"
+    requires_gpu: false
+    
+  CPU_INGEST:
+    description: "CPU-only data ingestion phase"
+    trigger: "No GPU available OR normal daily operation"
+    allowed_actions:
+      - "Scrape verified sources"
+      - "Normalize articles to schema"
+      - "Deduplicate cases"
+      - "Update structured dataset"
+      - "Checkpoint progress"
+    next_state: "GPU_DISTILL"
+    requires_gpu: false
+    
+  GPU_DISTILL:
+    description: "GPU-accelerated LLM distillation"
+    trigger: "GPU attached AND quota available"
+    allowed_actions:
+      - "Load LLM model"
+      - "Review normalized cases"
+      - "Classify rare vs non-rare"
+      - "Extract clinical features"
+      - "Save distilled output"
+    next_state: "CPU_POST"
+    requires_gpu: true
+    max_duration_minutes: 20
+    
+  CPU_POST:
+    description: "Post-GPU processing phase"
+    trigger: "GPU detached OR GPU work complete"
+    allowed_actions:
+      - "Generate embeddings"
+      - "Update FAISS indices"
+      - "Persist indices to disk"
+      - "Update audit logs"
+      - "Verify data integrity"
+    next_state: "SERVE"
+    requires_gpu: false
+    
+  SERVE:
+    description: "Ready to serve similarity queries"
+    trigger: "All processing complete"
+    allowed_actions:
+      - "Accept patient similarity queries"
+      - "Return matched rare cases"
+      - "Log query audit trail"
+    next_state: "CPU_INGEST"  # On new data cycle
+    requires_gpu: false
+    
+  SAFE_HALT:
+    description: "Safe shutdown state"
+    trigger: "Error OR quota exceeded OR manual stop"
+    allowed_actions:
+      - "Persist all checkpoints"
+      - "Flush logs"
+      - "Release resources"
+      - "Record halt reason"
+    next_state: null  # Terminal until restart
+    requires_gpu: false
+
+# ==========================================
+# State Transitions (Exhaustive)
+# ==========================================
+# These are the ONLY valid transitions.
+
+transitions:
+  - from: "INIT"
+    to: "CPU_INGEST"
+    condition: "Initialization complete"
+    
+  - from: "CPU_INGEST"
+    to: "GPU_DISTILL"
+    condition: "GPU attached AND quota > 0"
+    
+  - from: "CPU_INGEST"
+    to: "SERVE"
+    condition: "No new data AND embeddings current"
+    
+  - from: "GPU_DISTILL"
+    to: "CPU_POST"
+    condition: "GPU detached OR time limit reached"
+    
+  - from: "CPU_POST"
+    to: "SERVE"
+    condition: "FAISS update complete"
+    
+  - from: "SERVE"
+    to: "CPU_INGEST"
+    condition: "New data available OR daily cycle"
+    
+  # Error transitions (from any state)
+  - from: "*"
+    to: "SAFE_HALT"
+    condition: "Critical error OR quota exceeded"
+
+# ==========================================
+# Hard Stops (Non-Negotiable)
+# ==========================================
+hard_stops:
+  - condition: "GPU quota exceeded"
+    action: "Immediate transition to SAFE_HALT"
+    
+  - condition: "FAISS index corrupted"
+    action: "Halt, log error, require manual intervention"
+    
+  - condition: "Missing embeddings for indexed case"
+    action: "Halt indexing, report inconsistency"
+    
+  - condition: "Schema version mismatch"
+    action: "Halt processing, require re-embedding"
+    
+  - condition: "Checkpoint file corrupted"
+    action: "Halt, attempt recovery from backup"
+
+# ==========================================
+# State Persistence
+# ==========================================
+persistence:
+  state_file: "checkpoints/system_state.json"
+  backup_on_transition: true
+  
+  saved_fields:
+    - current_state
+    - last_transition_time
+    - transition_reason
+    - gpu_minutes_remaining
+    - cases_processed_today

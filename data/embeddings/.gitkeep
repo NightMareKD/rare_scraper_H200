@@ -1,0 +1,21 @@
+# Embeddings Directory
+
+This directory contains numpy arrays of embeddings per clinical domain.
+
+## Files
+
+- `symptoms.npy` - Symptom embeddings (N x 384)
+- `ecg.npy` - ECG embeddings (N x 384)
+- `labs.npy` - Lab value embeddings (N x 384)
+- `demographics.npy` - Demographics embeddings (N x 384)
+- `imaging.npy` - Imaging embeddings (N x 384)
+
+## Mapping
+
+Embeddings are stored in the same order as `embedded_ids.txt` in checkpoints.
+Row i in any .npy file corresponds to case ID at line i in embedded_ids.txt.
+
+## Model
+
+Generated using: sentence-transformers/all-MiniLM-L6-v2
+Dimension: 384

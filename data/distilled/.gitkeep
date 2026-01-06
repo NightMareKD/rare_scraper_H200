@@ -1,0 +1,23 @@
+# Distilled Data Directory
+
+This directory contains LLM-reviewed and classified cases.
+
+## Files
+
+- `rare_cases.jsonl` - Cases classified as rare/unusual presentations
+- `non_rare_cases.jsonl` - Cases classified as common presentations
+
+## Format
+
+Each line includes original case plus LLM annotations:
+```json
+{
+  "case_id": "PMID_12345678",
+  "is_rare": true,
+  "rarity_score": 0.85,
+  "rarity_reasons": ["unusual ECG pattern", "atypical age presentation"],
+  "key_features": ["Type 1 Brugada pattern", "family history of SCD"],
+  "distilled_at": "2026-01-05T04:00:00Z",
+  ...original_case_data...
+}
+```

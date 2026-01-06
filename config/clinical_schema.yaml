@@ -1,0 +1,529 @@
+# ==========================================
+# Clinical Schema Configuration
+# ==========================================
+# Defines how raw text is normalized into structured clinical data.
+# IMPORTANT: Changing this schema invalidates existing embeddings.
+# ==========================================
+
+version: "2.0"
+schema_hash: "abc123"  # Update when schema changes
+last_updated: "2026-01-05"
+
+# Schema versioning
+versioning:
+  track_changes: true
+  migration_required_on_change: true
+  backup_before_migration: true
+
+# ==========================================
+# Clinical Domains
+# ==========================================
+
+domains:
+  # ==========================================
+  # SYMPTOMS DOMAIN
+  # ==========================================
+  symptoms:
+    description: "Clinical presentation and symptomatology"
+    embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+    
+    # Fields to extract
+    fields:
+      chief_complaint:
+        type: "text"
+        required: true
+        max_length: 500
+        
+      presenting_symptoms:
+        type: "list"
+        item_type: "text"
+        max_items: 20
+        
+      symptom_duration:
+        type: "duration"
+        unit: "days"
+        
+      symptom_onset:
+        type: "categorical"
+        options:
+          - "acute"
+          - "subacute"
+          - "chronic"
+          - "intermittent"
+          
+      symptom_severity:
+        type: "categorical"
+        options:
+          - "mild"
+          - "moderate"
+          - "severe"
+          - "critical"
+          
+      associated_symptoms:
+        type: "list"
+        item_type: "text"
+        max_items: 15
+        
+      symptom_progression:
+        type: "text"
+        max_length: 300
+    
+    # Normalization rules
+    normalization:
+      lowercase: true
+      remove_stopwords: false
+      medical_spelling_correction: true
+      
+      # Synonym mapping
+      synonyms:
+        chest_pain:
+          - "chest discomfort"
+          - "thoracic pain"
+          - "precordial pain"
+          - "angina"
+        dyspnea:
+          - "shortness of breath"
+          - "breathlessness"
+          - "difficulty breathing"
+          - "SOB"
+        palpitations:
+          - "heart racing"
+          - "skipped beats"
+          - "fluttering"
+          - "irregular heartbeat"
+        syncope:
+          - "fainting"
+          - "loss of consciousness"
+          - "blackout"
+          - "passed out"
+
+  # ==========================================
+  # ECG DOMAIN
+  # ==========================================
+  ecg:
+    description: "Electrocardiogram findings and interpretations"
+    embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+    
+    fields:
+      rhythm:
+        type: "categorical"
+        options:
+          - "sinus_rhythm"
+          - "atrial_fibrillation"
+          - "atrial_flutter"
+          - "ventricular_tachycardia"
+          - "ventricular_fibrillation"
+          - "supraventricular_tachycardia"
+          - "bradycardia"
+          - "heart_block"
+          - "paced_rhythm"
+          - "other"
+          
+      rate:
+        type: "numeric"
+        unit: "bpm"
+        min: 20
+        max: 300
+        
+      pr_interval:
+        type: "numeric"
+        unit: "ms"
+        min: 80
+        max: 400
+        
+      qrs_duration:
+        type: "numeric"
+        unit: "ms"
+        min: 60
+        max: 300
+        
+      qt_interval:
+        type: "numeric"
+        unit: "ms"
+        min: 200
+        max: 700
+        
+      qtc:
+        type: "numeric"
+        unit: "ms"
+        min: 300
+        max: 600
+        
+      axis:
+        type: "categorical"
+        options:
+          - "normal"
+          - "left_axis_deviation"
+          - "right_axis_deviation"
+          - "extreme_axis"
+          
+      st_changes:
+        type: "list"
+        item_type: "structured"
+        fields:
+          location:
+            type: "categorical"
+            options: ["anterior", "lateral", "inferior", "posterior", "diffuse"]
+          type:
+            type: "categorical"
+            options: ["elevation", "depression", "none"]
+          magnitude:
+            type: "numeric"
+            unit: "mm"
+            
+      t_wave_changes:
+        type: "list"
+        item_type: "text"
+        
+      additional_findings:
+        type: "text"
+        max_length: 500
+    
+    normalization:
+      standardize_units: true
+      numeric_ranges:
+        flag_outliers: true
+        
+      # ECG-specific abbreviations
+      abbreviations:
+        LBBB: "left bundle branch block"
+        RBBB: "right bundle branch block"
+        LAD: "left axis deviation"
+        RAD: "right axis deviation"
+        LVH: "left ventricular hypertrophy"
+        RVH: "right ventricular hypertrophy"
+        AF: "atrial fibrillation"
+        VT: "ventricular tachycardia"
+        VF: "ventricular fibrillation"
+        SVT: "supraventricular tachycardia"
+        PVC: "premature ventricular contraction"
+        PAC: "premature atrial contraction"
+
+  # ==========================================
+  # LABS DOMAIN
+  # ==========================================
+  labs:
+    description: "Laboratory values and biomarkers"
+    embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+    
+    fields:
+      cardiac_biomarkers:
+        type: "structured"
+        fields:
+          troponin:
+            type: "numeric"
+            unit: "ng/mL"
+            reference_range: [0, 0.04]
+          bnp:
+            type: "numeric"
+            unit: "pg/mL"
+            reference_range: [0, 100]
+          nt_pro_bnp:
+            type: "numeric"
+            unit: "pg/mL"
+            reference_range: [0, 125]
+          ck_mb:
+            type: "numeric"
+            unit: "ng/mL"
+            reference_range: [0, 5]
+            
+      electrolytes:
+        type: "structured"
+        fields:
+          sodium:
+            type: "numeric"
+            unit: "mEq/L"
+            reference_range: [136, 145]
+          potassium:
+            type: "numeric"
+            unit: "mEq/L"
+            reference_range: [3.5, 5.0]
+          calcium:
+            type: "numeric"
+            unit: "mg/dL"
+            reference_range: [8.5, 10.5]
+          magnesium:
+            type: "numeric"
+            unit: "mg/dL"
+            reference_range: [1.7, 2.2]
+            
+      renal_function:
+        type: "structured"
+        fields:
+          creatinine:
+            type: "numeric"
+            unit: "mg/dL"
+            reference_range: [0.7, 1.3]
+          bun:
+            type: "numeric"
+            unit: "mg/dL"
+            reference_range: [7, 20]
+          gfr:
+            type: "numeric"
+            unit: "mL/min/1.73m2"
+            reference_range: [90, 120]
+            
+      complete_blood_count:
+        type: "structured"
+        fields:
+          hemoglobin:
+            type: "numeric"
+            unit: "g/dL"
+            reference_range: [12, 17]
+          wbc:
+            type: "numeric"
+            unit: "K/uL"
+            reference_range: [4.5, 11.0]
+          platelets:
+            type: "numeric"
+            unit: "K/uL"
+            reference_range: [150, 400]
+            
+      coagulation:
+        type: "structured"
+        fields:
+          inr:
+            type: "numeric"
+            reference_range: [0.9, 1.1]
+          ptt:
+            type: "numeric"
+            unit: "seconds"
+            reference_range: [25, 35]
+            
+      other_labs:
+        type: "text"
+        max_length: 500
+    
+    normalization:
+      standardize_units: true
+      flag_abnormal_values: true
+      calculate_derived_values: true
+
+  # ==========================================
+  # DEMOGRAPHICS DOMAIN
+  # ==========================================
+  demographics:
+    description: "Patient demographics and medical history"
+    embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+    
+    fields:
+      age:
+        type: "numeric"
+        unit: "years"
+        min: 0
+        max: 120
+        
+      age_group:
+        type: "categorical"
+        options:
+          - "pediatric"      # 0-17
+          - "young_adult"    # 18-39
+          - "middle_aged"    # 40-64
+          - "elderly"        # 65+
+          
+      sex:
+        type: "categorical"
+        options:
+          - "male"
+          - "female"
+          - "other"
+          - "not_specified"
+          
+      medical_history:
+        type: "list"
+        item_type: "text"
+        max_items: 30
+        
+      cardiovascular_risk_factors:
+        type: "list"
+        item_type: "categorical"
+        options:
+          - "hypertension"
+          - "diabetes"
+          - "dyslipidemia"
+          - "smoking"
+          - "obesity"
+          - "family_history_cad"
+          - "sedentary_lifestyle"
+          
+      medications:
+        type: "list"
+        item_type: "text"
+        max_items: 30
+        
+      allergies:
+        type: "list"
+        item_type: "text"
+        max_items: 10
+        
+      family_history:
+        type: "text"
+        max_length: 500
+        
+      social_history:
+        type: "text"
+        max_length: 300
+    
+    normalization:
+      age_to_group: true
+      standardize_medications: true
+
+  # ==========================================
+  # IMAGING DOMAIN
+  # ==========================================
+  imaging:
+    description: "Imaging studies and findings"
+    embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+    
+    fields:
+      echocardiogram:
+        type: "structured"
+        fields:
+          lvef:
+            type: "numeric"
+            unit: "percent"
+            min: 5
+            max: 80
+          lv_function:
+            type: "categorical"
+            options: ["normal", "mildly_reduced", "moderately_reduced", "severely_reduced"]
+          rv_function:
+            type: "categorical"
+            options: ["normal", "mildly_reduced", "moderately_reduced", "severely_reduced"]
+          valvular_findings:
+            type: "text"
+          wall_motion:
+            type: "text"
+          pericardium:
+            type: "text"
+            
+      chest_xray:
+        type: "structured"
+        fields:
+          cardiac_silhouette:
+            type: "categorical"
+            options: ["normal", "enlarged", "boot_shaped", "globular"]
+          pulmonary_vasculature:
+            type: "text"
+          lung_fields:
+            type: "text"
+          pleural_space:
+            type: "text"
+            
+      cardiac_mri:
+        type: "structured"
+        fields:
+          late_gadolinium_enhancement:
+            type: "text"
+          edema:
+            type: "boolean"
+          perfusion_defects:
+            type: "text"
+          tissue_characterization:
+            type: "text"
+            
+      cardiac_ct:
+        type: "structured"
+        fields:
+          coronary_calcium_score:
+            type: "numeric"
+          stenosis:
+            type: "text"
+          other_findings:
+            type: "text"
+            
+      other_imaging:
+        type: "text"
+        max_length: 500
+    
+    normalization:
+      standardize_measurements: true
+
+# ==========================================
+# Diagnosis & Outcome
+# ==========================================
+
+  diagnosis:
+    description: "Final diagnosis and disease classification"
+    
+    fields:
+      primary_diagnosis:
+        type: "text"
+        required: true
+        max_length: 300
+        
+      secondary_diagnoses:
+        type: "list"
+        item_type: "text"
+        max_items: 10
+        
+      icd_codes:
+        type: "list"
+        item_type: "text"
+        max_items: 10
+        
+      diagnosis_category:
+        type: "categorical"
+        options:
+          - "arrhythmia"
+          - "cardiomyopathy"
+          - "coronary_artery_disease"
+          - "valvular_disease"
+          - "congenital"
+          - "pericardial"
+          - "vascular"
+          - "other"
+          
+      is_rare_disease:
+        type: "boolean"
+        
+      orphanet_code:
+        type: "text"
+        description: "Rare disease identifier if applicable"
+
+  outcome:
+    description: "Clinical outcome and follow-up"
+    
+    fields:
+      treatment:
+        type: "text"
+        max_length: 500
+        
+      procedures:
+        type: "list"
+        item_type: "text"
+        max_items: 10
+        
+      outcome_status:
+        type: "categorical"
+        options:
+          - "recovered"
+          - "improved"
+          - "stable"
+          - "deteriorated"
+          - "deceased"
+          - "unknown"
+          
+      follow_up_duration:
+        type: "duration"
+        unit: "months"
+        
+      complications:
+        type: "list"
+        item_type: "text"
+        max_items: 10
+
+# ==========================================
+# Validation Rules
+# ==========================================
+
+validation:
+  required_domains:
+    - symptoms
+    - diagnosis
+    
+  minimum_completeness: 0.4  # 40% of fields must be populated
+  
+  cross_domain_validation:
+    - rule: "if diagnosis.is_rare_disease then diagnosis.orphanet_code should exist"
+    - rule: "if ecg.rhythm exists then ecg.rate should exist"

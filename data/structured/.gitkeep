@@ -1,0 +1,28 @@
+# Structured Data Directory
+
+This directory contains clinically normalized cases.
+
+## Files
+
+- `normalized_cases.jsonl` - Successfully normalized cases (one JSON per line)
+- `rejected_cases.jsonl` - Cases that failed normalization (with rejection reason)
+- `deduplicated_ids.txt` - IDs of cases identified as duplicates
+
+## Format
+
+Each line in `normalized_cases.jsonl`:
+```json
+{
+  "case_id": "PMID_12345678",
+  "source": "pubmed",
+  "scraped_at": "2026-01-05T02:30:00Z",
+  "normalized_at": "2026-01-05T03:00:00Z",
+  "symptoms": {...},
+  "ecg": {...},
+  "labs": {...},
+  "demographics": {...},
+  "imaging": {...},
+  "diagnosis": {...},
+  "outcome": {...}
+}
+```

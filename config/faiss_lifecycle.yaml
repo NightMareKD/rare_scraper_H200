@@ -1,0 +1,261 @@
+# ==========================================
+# FAISS Database Lifecycle Configuration
+# ==========================================
+# Defines EXACTLY how FAISS indices are managed.
+# These rules are NON-NEGOTIABLE.
+# ==========================================
+
+version: "1.0"
+last_updated: "2026-01-06"
+lifecycle_locked: true
+
+# ==========================================
+# FAISS Index Rules (NON-NEGOTIABLE)
+# ==========================================
+
+rules:
+  # Index type - FIXED
+  index_type:
+    type: "IndexFlatIP"
+    metric: "cosine_similarity"
+    description: "Flat inner product index for exact cosine similarity"
+    
+  # Append-only policy
+  append_only:
+    enabled: true
+    description: "Vectors can only be added, never removed or modified"
+    enforcement: "No delete or update operations allowed"
+    violation_action: "HALT - index corruption risk"
+    
+  # Rebuild policy
+  rebuild_policy:
+    mid_project_rebuild: false
+    description: "Index is NEVER rebuilt during the 6-day project"
+    allowed_rebuild_triggers:
+      - "Schema version change"
+      - "Embedding model change"
+      - "Catastrophic corruption"
+    requires_approval: true
+    
+  # Persistence policy
+  persistence:
+    persist_after_every_update: true
+    atomic_write: true
+    backup_before_write: true
+    
+  # Versioning
+  versioning:
+    enabled: true
+    version_file: "checkpoints/faiss_version.json"
+    increment_on_update: true
+
+# ==========================================
+# Index Structure (Per Dimension)
+# ==========================================
+
+indices:
+  symptoms:
+    file: "data/faiss/symptoms.index"
+    dimension: 384
+    expected_final_count: 15000  # ~15K rare cases
+    
+  ecg:
+    file: "data/faiss/ecg.index"
+    dimension: 384
+    expected_final_count: 15000
+    
+  labs:
+    file: "data/faiss/labs.index"
+    dimension: 384
+    expected_final_count: 15000
+    
+  demographics:
+    file: "data/faiss/demographics.index"
+    dimension: 384
+    expected_final_count: 15000
+    
+  imaging:
+    file: "data/faiss/imaging.index"
+    dimension: 384
+    expected_final_count: 15000
+
+# ==========================================
+# Vector Metadata Linkage
+# ==========================================
+# Every vector in FAISS links to this metadata for audit traceability.
+
+vector_metadata:
+  storage_file: "data/faiss/vector_metadata.jsonl"
+  
+  required_fields:
+    - field: "vector_id"
+      description: "Position in FAISS index"
+      
+    - field: "case_id"
+      description: "Unique case identifier"
+      
+    - field: "source_url"
+      description: "Original publication URL"
+      
+    - field: "rare_explanation"
+      description: "Why this case is rare"
+      
+    - field: "clinical_domain"
+      description: "Which dimension this vector represents"
+      
+    - field: "publication_year"
+      description: "Year of original publication"
+      
+    - field: "journal"
+      description: "Source journal name"
+      
+    - field: "indexed_at"
+      description: "Timestamp when added to index"
+
+# ==========================================
+# Version File Schema
+# ==========================================
+
+version_schema:
+  file: "checkpoints/faiss_version.json"
+  
+  fields:
+    version:
+      type: "integer"
+      description: "Incremental version number"
+      
+    last_updated:
+      type: "datetime"
+      format: "ISO8601"
+      
+    case_count:
+      type: "integer"
+      description: "Total vectors in index"
+      
+    previous_count:
+      type: "integer"
+      description: "Count before last update"
+      
+    index_checksums:
+      type: "object"
+      description: "SHA256 checksums per index file"
+      
+    embedding_model:
+      type: "string"
+      description: "Model used for embeddings"
+      
+    schema_version:
+      type: "string"
+      description: "Clinical schema version"
+
+# ==========================================
+# Query Operations
+# ==========================================
+
+query_settings:
+  # Maximum results per domain
+  k_per_domain: 50
+  
+  # Final results after composite scoring
+  max_final_results: 20
+  
+  # Minimum score to return
+  min_similarity_score: 0.30
+  
+  # Search algorithm
+  search_type: "exact"  # No approximate search for clinical accuracy
+  
+  # Normalization
+  normalize_query_vectors: true
+
+# ==========================================
+# Index Update Procedure
+# ==========================================
+
+update_procedure:
+  steps:
+    - step: 1
+      action: "Load new embeddings from numpy files"
+      
+    - step: 2
+      action: "Validate vector dimensions match index"
+      
+    - step: 3
+      action: "Create backup of current index"
+      
+    - step: 4
+      action: "Add vectors to index"
+      
+    - step: 5
+      action: "Append metadata to vector_metadata.jsonl"
+      
+    - step: 6
+      action: "Update faiss_version.json"
+      
+    - step: 7
+      action: "Compute and store index checksum"
+      
+    - step: 8
+      action: "Verify index integrity"
+      
+    - step: 9
+      action: "Persist index to disk (atomic write)"
+      
+    - step: 10
+      action: "Log update to audit.log"
+
+# ==========================================
+# Integrity Verification
+# ==========================================
+
+integrity_checks:
+  on_startup:
+    - "Verify all index files exist"
+    - "Verify checksums match faiss_version.json"
+    - "Verify vector count matches metadata count"
+    - "Verify dimension consistency"
+    
+  on_query:
+    - "Verify index is loaded"
+    - "Verify query vector dimension"
+    
+  on_update:
+    - "Verify new vectors match dimension"
+    - "Verify metadata completeness"
+    - "Verify no duplicate case_ids"
+    
+  failure_actions:
+    checksum_mismatch: "HALT - possible corruption"
+    count_mismatch: "HALT - metadata inconsistency"
+    dimension_mismatch: "REJECT operation"
+
+# ==========================================
+# 6-Day Projection
+# ==========================================
+
+six_day_projection:
+  day_1:
+    new_vectors_per_dimension: 2000
+    cumulative_total: 2000
+    
+  day_2:
+    new_vectors_per_dimension: 2000
+    cumulative_total: 4000
+    
+  day_3:
+    new_vectors_per_dimension: 2500
+    cumulative_total: 6500
+    
+  day_4:
+    new_vectors_per_dimension: 2500
+    cumulative_total: 9000
+    
+  day_5:
+    new_vectors_per_dimension: 3000
+    cumulative_total: 12000
+    
+  day_6:
+    new_vectors_per_dimension: 3000
+    cumulative_total: 15000
+    
+  total_vectors_all_dimensions: 75000  # 15K × 5 dimensions

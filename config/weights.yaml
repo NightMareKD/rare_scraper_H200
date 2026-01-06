@@ -1,0 +1,209 @@
+# ==========================================
+# Similarity Weights Configuration
+# ==========================================
+# Defines how different clinical domains contribute to 
+# the composite similarity score.
+# ==========================================
+
+version: "1.0"
+last_updated: "2026-01-05"
+
+# ==========================================
+# Domain Weights
+# ==========================================
+# Weights must sum to 1.0 (100%)
+# These determine relative importance in similarity scoring
+
+domain_weights:
+  # Clinical presentation - most important for case matching
+  symptoms: 0.30
+  
+  # Electrocardiogram findings - critical for cardiac cases
+  ecg: 0.25
+  
+  # Laboratory values - important for differential diagnosis
+  labs: 0.25
+  
+  # Patient demographics - moderate importance
+  demographics: 0.10
+  
+  # Imaging findings - supportive evidence
+  imaging: 0.10
+
+# ==========================================
+# Weight Presets
+# ==========================================
+# Predefined weight configurations for different use cases
+
+presets:
+  # Default balanced configuration
+  balanced:
+    symptoms: 0.30
+    ecg: 0.25
+    labs: 0.25
+    demographics: 0.10
+    imaging: 0.10
+  
+  # Arrhythmia-focused (emphasizes ECG)
+  arrhythmia_focus:
+    symptoms: 0.20
+    ecg: 0.40
+    labs: 0.15
+    demographics: 0.10
+    imaging: 0.15
+  
+  # Structural heart disease (emphasizes imaging)
+  structural_focus:
+    symptoms: 0.20
+    ecg: 0.15
+    labs: 0.15
+    demographics: 0.10
+    imaging: 0.40
+  
+  # Metabolic/toxic (emphasizes labs)
+  metabolic_focus:
+    symptoms: 0.20
+    ecg: 0.15
+    labs: 0.40
+    demographics: 0.15
+    imaging: 0.10
+  
+  # Symptom-driven search
+  symptom_focus:
+    symptoms: 0.50
+    ecg: 0.15
+    labs: 0.15
+    demographics: 0.10
+    imaging: 0.10
+  
+  # Rare disease (balanced with demographics)
+  rare_disease:
+    symptoms: 0.25
+    ecg: 0.20
+    labs: 0.20
+    demographics: 0.20
+    imaging: 0.15
+
+# ==========================================
+# Dynamic Weight Adjustment
+# ==========================================
+# Rules for adjusting weights based on query content
+
+dynamic_adjustment:
+  enabled: true
+  
+  rules:
+    # If query has strong ECG findings, boost ECG weight
+    - condition: "ecg_findings_detailed"
+      adjustment:
+        ecg: "+0.10"
+        symptoms: "-0.05"
+        labs: "-0.05"
+    
+    # If query has significant lab abnormalities
+    - condition: "labs_abnormal"
+      adjustment:
+        labs: "+0.10"
+        demographics: "-0.05"
+        imaging: "-0.05"
+    
+    # If pediatric case
+    - condition: "age < 18"
+      adjustment:
+        demographics: "+0.10"
+        labs: "-0.05"
+        imaging: "-0.05"
+    
+    # If imaging is primary diagnostic modality
+    - condition: "imaging_primary"
+      adjustment:
+        imaging: "+0.15"
+        symptoms: "-0.05"
+        ecg: "-0.05"
+        labs: "-0.05"
+
+# ==========================================
+# Sub-domain Weights
+# ==========================================
+# Weights within each domain for fine-grained matching
+
+sub_domain_weights:
+  symptoms:
+    chief_complaint: 0.35
+    presenting_symptoms: 0.30
+    symptom_duration: 0.10
+    symptom_onset: 0.10
+    symptom_severity: 0.10
+    associated_symptoms: 0.05
+  
+  ecg:
+    rhythm: 0.35
+    st_changes: 0.25
+    rate: 0.15
+    intervals: 0.15
+    axis: 0.05
+    additional_findings: 0.05
+  
+  labs:
+    cardiac_biomarkers: 0.40
+    electrolytes: 0.25
+    renal_function: 0.15
+    complete_blood_count: 0.10
+    coagulation: 0.10
+  
+  demographics:
+    age_group: 0.30
+    sex: 0.20
+    cardiovascular_risk_factors: 0.25
+    medical_history: 0.25
+  
+  imaging:
+    echocardiogram: 0.40
+    cardiac_mri: 0.25
+    chest_xray: 0.20
+    cardiac_ct: 0.15
+
+# ==========================================
+# Scoring Formula
+# ==========================================
+# composite_score = Σ (domain_weight[i] × domain_similarity[i])
+# 
+# Where:
+#   - domain_weight[i] is from domain_weights above
+#   - domain_similarity[i] is cosine similarity of embeddings
+#
+# Example:
+#   symptoms_sim = 0.85
+#   ecg_sim = 0.72
+#   labs_sim = 0.60
+#   demographics_sim = 0.90
+#   imaging_sim = 0.55
+#
+#   composite = (0.30 × 0.85) + (0.25 × 0.72) + (0.25 × 0.60) 
+#             + (0.10 × 0.90) + (0.10 × 0.55)
+#             = 0.255 + 0.18 + 0.15 + 0.09 + 0.055
+#             = 0.73 (73% similarity)
+
+# ==========================================
+# Weight Justification (for explainability)
+# ==========================================
+justification:
+  symptoms: |
+    Symptoms are weighted at 30% as they represent the primary clinical 
+    presentation and are the most consistent element across case reports.
+    
+  ecg: |
+    ECG findings are weighted at 25% as they provide objective, quantifiable 
+    data that is crucial for cardiac case matching and diagnosis.
+    
+  labs: |
+    Laboratory values are weighted at 25% as they provide objective markers 
+    that can differentiate between similar presentations.
+    
+  demographics: |
+    Demographics are weighted at 10% as they provide important context 
+    but should not dominate the similarity calculation to avoid bias.
+    
+  imaging: |
+    Imaging is weighted at 10% as it provides supportive diagnostic 
+    information but may not be consistently available across all cases.

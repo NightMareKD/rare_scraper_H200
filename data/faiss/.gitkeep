@@ -1,0 +1,29 @@
+# FAISS Index Directory
+
+This directory contains FAISS indices for similarity search.
+
+## Files
+
+- `symptoms.index` - FAISS index for symptom embeddings
+- `ecg.index` - FAISS index for ECG embeddings
+- `labs.index` - FAISS index for lab embeddings
+- `demographics.index` - FAISS index for demographics embeddings
+- `imaging.index` - FAISS index for imaging embeddings
+
+## Index Type
+
+IndexFlatIP (Flat Inner Product for cosine similarity)
+
+## Usage
+
+```python
+import faiss
+import numpy as np
+
+# Load index
+index = faiss.read_index("symptoms.index")
+
+# Query
+query_vector = np.array([[...]]).astype('float32')
+distances, indices = index.search(query_vector, k=10)
+```

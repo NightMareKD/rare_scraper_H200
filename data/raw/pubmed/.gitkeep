@@ -1,0 +1,6 @@
+# Raw PubMed Data
+This directory stores raw, unmodified content scraped from PubMed Central.
+
+Files are named: `{PMID}.json` or `{PMID}.xml`
+
+Do not modify files in this directory - they are for traceability and reprocessing.

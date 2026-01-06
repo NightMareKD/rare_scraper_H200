@@ -1,0 +1,234 @@
+# ==========================================
+# LLM Distillation Rules (IMMUTABLE)
+# ==========================================
+# Defines EXACTLY how the LLM reviews cases for rarity.
+# These rules are LOCKED and should not be modified
+# without full system revalidation.
+# ==========================================
+
+version: "1.0"
+last_updated: "2026-01-06"
+schema_locked: true
+
+# ==========================================
+# LLM Role Definition (STRICT)
+# ==========================================
+
+llm_role:
+  # What the LLM DOES
+  responsibilities:
+    - "Review already normalized cases"
+    - "Determine rarity classification"
+    - "Extract rarity explanation"
+    - "Output structured medical facts"
+    
+  # What the LLM DOES NOT DO
+  prohibited_actions:
+    - "Generate embeddings"
+    - "Classify patients"
+    - "Score similarity"
+    - "Make diagnostic conclusions"
+    - "Recommend treatments"
+
+# ==========================================
+# Rarity Definition (LOCKED)
+# ==========================================
+# A cardiology case is RARE only if AT LEAST ONE applies.
+# If NONE apply → case is NOT RARE.
+
+rarity_criteria:
+  # Criterion 1: Low prevalence
+  prevalence_threshold:
+    enabled: true
+    threshold: "1:2000"
+    description: "Condition affects fewer than 1 in 2,000 people"
+    examples:
+      - "Brugada syndrome"
+      - "Arrhythmogenic right ventricular cardiomyopathy"
+      - "Catecholaminergic polymorphic VT"
+      - "Long QT syndrome (congenital)"
+      
+  # Criterion 2: Atypical presentation
+  atypical_presentation:
+    enabled: true
+    description: "Unusual manifestation of a known disease"
+    examples:
+      - "MI presenting as epigastric pain only"
+      - "Heart failure in patient under 30"
+      - "Aortic dissection without chest pain"
+      - "Myocarditis mimicking STEMI"
+      
+  # Criterion 3: Rare ECG pattern
+  rare_ecg_pattern:
+    enabled: true
+    description: "Uncommon electrocardiographic finding"
+    examples:
+      - "Epsilon waves"
+      - "Brugada pattern (Type 1)"
+      - "Short QT syndrome pattern"
+      - "Osborn waves"
+      - "De Winter T-waves"
+      
+  # Criterion 4: Rare complication
+  rare_complication:
+    enabled: true
+    description: "Unusual complication of cardiac condition"
+    examples:
+      - "Coronary artery aneurysm post-MI"
+      - "Cardiac tamponade from myocarditis"
+      - "Complete heart block from endocarditis"
+      
+  # Criterion 5: Rare drug interaction
+  rare_drug_interaction:
+    enabled: true
+    description: "Unusual cardiac drug reaction"
+    examples:
+      - "Torsades from non-cardiac medication"
+      - "Drug-induced Brugada unmasking"
+      - "Paradoxical drug response"
+      
+  # Criterion 6: Rare demographic manifestation
+  rare_demographic:
+    enabled: true
+    description: "Condition rare for patient's age/sex"
+    examples:
+      - "Takotsubo in young male"
+      - "CAD in female under 40 without risk factors"
+      - "Pediatric acute coronary syndrome"
+
+# ==========================================
+# LLM Output Contract (IMMUTABLE)
+# ==========================================
+# Every reviewed case yields EXACTLY ONE of these outputs.
+# No other output format is valid.
+
+output_contract:
+  # Output for RARE cases
+  rare_case_output:
+    required_fields:
+      - field: "is_rare"
+        type: "boolean"
+        value: true
+        
+      - field: "rare_reason"
+        type: "string"
+        max_length: 500
+        description: "Explanation of why case is rare"
+        
+      - field: "rarity_criteria_met"
+        type: "list"
+        description: "Which criteria from rarity_criteria apply"
+        
+      - field: "primary_diagnosis"
+        type: "string"
+        max_length: 200
+        
+      - field: "key_ecg_pattern"
+        type: "string"
+        nullable: true
+        
+      - field: "key_labs"
+        type: "list"
+        max_items: 10
+        
+      - field: "key_symptoms"
+        type: "list"
+        max_items: 10
+        
+      - field: "reference_source"
+        type: "string"
+        description: "Original source URL or DOI"
+        
+    example:
+      is_rare: true
+      rare_reason: "Brugada syndrome unmasked by fever in young athlete"
+      rarity_criteria_met:
+        - "prevalence_threshold"
+        - "rare_ecg_pattern"
+      primary_diagnosis: "Brugada syndrome, Type 1"
+      key_ecg_pattern: "Coved ST elevation V1-V3 with RBBB morphology"
+      key_labs:
+        - "Normal electrolytes"
+        - "Normal troponin"
+      key_symptoms:
+        - "Syncope during exercise"
+        - "Family history of sudden death"
+      reference_source: "https://pubmed.ncbi.nlm.nih.gov/12345678"
+
+  # Output for NOT RARE cases
+  non_rare_case_output:
+    required_fields:
+      - field: "is_rare"
+        type: "boolean"
+        value: false
+        
+      - field: "rejection_reason"
+        type: "string"
+        max_length: 300
+        description: "Explicit reason why case is not rare"
+        
+    example:
+      is_rare: false
+      rejection_reason: "Common presentation of typical STEMI with standard risk factors"
+
+# ==========================================
+# LLM Processing Rules
+# ==========================================
+
+processing_rules:
+  # Input requirements
+  input_requirements:
+    - "Case must be fully normalized to clinical schema"
+    - "All required schema fields must be populated"
+    - "Case must not already be in llm_reviewed_ids"
+    
+  # Batch processing
+  batch_settings:
+    batch_size: 16
+    max_tokens_per_case: 2000
+    temperature: 0.1  # Low for consistency
+    
+  # Quality controls
+  quality_controls:
+    require_structured_output: true
+    validate_output_schema: true
+    reject_malformed_output: true
+    log_all_decisions: true
+
+# ==========================================
+# GPU Time Budget (HARD LIMITS)
+# ==========================================
+
+gpu_budget:
+  total_daily_minutes: 20
+  
+  allocation:
+    model_load: 2
+    distillation: 15
+    flush_and_save: 3
+    
+  enforcement:
+    minute_20_reached: "forced_stop"
+    no_retry_same_day: true
+    checkpoint_frequency: "every_batch"
+
+# ==========================================
+# Model Specification
+# ==========================================
+
+model:
+  # Primary model for distillation
+  primary:
+    name: "meta-llama/Llama-2-7b-chat-hf"
+    fallback: "mistralai/Mistral-7B-Instruct-v0.1"
+    
+  # Quantization for memory efficiency
+  quantization:
+    enabled: true
+    bits: 4
+    method: "bitsandbytes"
+    
+  # Context window
+  context:
+    max_input_tokens: 4096
+    max_output_tokens: 1024

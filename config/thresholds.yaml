@@ -1,0 +1,204 @@
+# ==========================================
+# Clinical Safety Thresholds Configuration
+# ==========================================
+# Defines minimum similarity thresholds for flagging cases.
+# These are CLINICAL SAFETY parameters - modify with caution.
+# ==========================================
+
+version: "1.0"
+last_updated: "2026-01-05"
+
+# ==========================================
+# Primary Thresholds
+# ==========================================
+
+# Composite score threshold for flagging
+# Cases with composite score >= this value are flagged for review
+composite_threshold: 0.50
+
+# Minimum number of domains that must exceed threshold
+# Prevents single-domain false positives
+minimum_domains_matched: 2
+
+# Critical domain requirement (ECG OR Symptoms must meet this)
+critical_domain_threshold: 0.45
+
+# ==========================================
+# Per-Domain Minimum Thresholds
+# ==========================================
+# Each domain must meet its minimum threshold to contribute
+# to the composite score. This prevents noise from low-quality matches.
+
+domain_thresholds:
+  symptoms:
+    minimum: 0.50
+    strong_match: 0.75
+    critical: 0.90
+    description: |
+      Symptom matching threshold. Lower threshold allows for 
+      variation in clinical presentation description.
+  
+  ecg:
+    minimum: 0.55
+    strong_match: 0.80
+    critical: 0.95
+    description: |
+      ECG threshold is higher due to objective nature of findings.
+      Critical threshold for near-identical ECG patterns.
+  
+  labs:
+    minimum: 0.50
+    strong_match: 0.75
+    critical: 0.90
+    description: |
+      Lab threshold accounts for normal variation in values.
+      Strong match indicates similar abnormality patterns.
+  
+  demographics:
+    minimum: 0.40
+    strong_match: 0.70
+    critical: 0.85
+    description: |
+      Demographics threshold is lower as exact matching 
+      is less clinically relevant.
+  
+  imaging:
+    minimum: 0.45
+    strong_match: 0.70
+    critical: 0.85
+    description: |
+      Imaging threshold accounts for variation in 
+      reporting style and available modalities.
+
+# ==========================================
+# Clinical Alert Levels
+# ==========================================
+
+alert_levels:
+  # Routine match - for information only
+  routine:
+    composite_range: [0.50, 0.65]
+    action: "log_only"
+    review_priority: "low"
+    description: "Moderate similarity - may be of interest"
+  
+  # Significant match - warrants attention
+  significant:
+    composite_range: [0.65, 0.80]
+    action: "flag_for_review"
+    review_priority: "medium"
+    description: "High similarity - clinically relevant match"
+  
+  # Critical match - immediate attention
+  critical:
+    composite_range: [0.80, 1.00]
+    action: "priority_flag"
+    review_priority: "high"
+    description: "Very high similarity - strongly similar case"
+
+# ==========================================
+# Safety Rules
+# ==========================================
+
+safety_rules:
+  # Require minimum ECG similarity for arrhythmia cases
+  - name: "arrhythmia_ecg_check"
+    condition: "diagnosis.category == 'arrhythmia'"
+    requirement: "ecg.similarity >= 0.60"
+    action: "reduce_confidence_if_not_met"
+    confidence_reduction: 0.15
+    rationale: |
+      Arrhythmia cases must have reasonable ECG similarity 
+      to be considered valid matches.
+  
+  # Require symptom match for syndrome patterns
+  - name: "syndrome_symptom_check"
+    condition: "diagnosis.is_rare_disease == true"
+    requirement: "symptoms.similarity >= 0.55"
+    action: "reduce_confidence_if_not_met"
+    confidence_reduction: 0.10
+    rationale: |
+      Rare disease/syndrome cases typically present with 
+      characteristic symptom patterns.
+  
+  # Age group consistency check
+  - name: "age_group_consistency"
+    condition: "demographics.age_group != query.age_group"
+    action: "apply_penalty"
+    penalty: 0.05
+    rationale: |
+      Significant age difference may indicate different 
+      disease manifestation or etiology.
+
+# ==========================================
+# False Positive Control
+# ==========================================
+
+false_positive_control:
+  # Maximum matches to return per query
+  max_results: 20
+  
+  # Minimum composite score to include in results
+  min_score_for_results: 0.50
+  
+  # Diversity requirement - avoid returning too-similar cases
+  diversity:
+    enabled: true
+    min_difference_between_results: 0.05
+    max_from_same_source: 3
+  
+  # Exclude self-matches (same case ID)
+  exclude_self_match: true
+  
+  # Exclude cases from same publication
+  exclude_same_publication: false
+
+# ==========================================
+# Confidence Scoring
+# ==========================================
+
+confidence_calculation:
+  # Base confidence from composite score
+  base_from_composite: true
+  
+  # Adjustments
+  adjustments:
+    # Boost for multiple strong domain matches
+    multi_domain_boost:
+      condition: "strong_matches >= 3"
+      boost: 0.05
+    
+    # Penalty for missing critical domains
+    missing_domain_penalty:
+      condition: "missing_domains >= 2"
+      penalty: 0.10
+    
+    # Boost for rare disease match
+    rare_disease_boost:
+      condition: "both_rare_disease == true"
+      boost: 0.08
+    
+    # Penalty for low data quality
+    quality_penalty:
+      condition: "data_completeness < 0.5"
+      penalty: 0.08
+
+# ==========================================
+# Threshold Calibration Notes
+# ==========================================
+# 
+# These thresholds were calibrated using:
+# 1. Known similar case pairs from literature
+# 2. Expert clinician feedback
+# 3. False positive rate analysis
+#
+# Recommended review frequency: Quarterly
+# Last calibration: 2026-01-05
+#
+# To recalibrate:
+# 1. Collect clinician feedback on match quality
+# 2. Analyze false positive rate
+# 3. Run A/B testing with different thresholds
+# 4. Update values and document rationale
+#
+# ==========================================

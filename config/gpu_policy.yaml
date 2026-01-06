@@ -1,0 +1,246 @@
+# ==========================================
+# GPU Policy Configuration
+# ==========================================
+# Controls GPU usage to prevent quota exhaustion on 
+# Hugging Face Spaces or other quota-limited environments.
+# ==========================================
+
+version: "1.0"
+last_updated: "2026-01-05"
+
+# ==========================================
+# Daily Quota Management (HARD BUDGET)
+# ==========================================
+
+quota:
+  # Maximum GPU minutes allowed per day (FIXED)
+  max_gpu_minutes_per_day: 20
+  
+  # Minute allocation breakdown
+  allocation:
+    model_load: 2
+    distillation: 15
+    flush_and_save: 3
+  
+  # Warning threshold (percentage of quota)
+  warning_threshold_percent: 75  # At 15 minutes
+  
+  # Hard stop threshold (percentage of quota)
+  hard_stop_threshold_percent: 100  # At minute 20 = forced stop
+  
+  # Quota reset time (UTC)
+  reset_time_utc: "00:00"
+  
+  # NO reserve - full 20 minutes for distillation
+  reserve_minutes: 0
+  
+  # Enforcement
+  minute_20_reached: "forced_stop"
+  no_retry_same_day: true
+
+# ==========================================
+# Batch Processing Settings
+# ==========================================
+
+batch_processing:
+  # Default batch size for GPU operations
+  default_batch_size: 32
+  
+  # Batch sizes per operation type
+  operation_batch_sizes:
+    embedding_generation: 64
+    llm_distillation: 16
+    faiss_indexing: 1000
+  
+  # Maximum items to process per GPU session
+  max_items_per_session:
+    embedding_generation: 5000
+    llm_distillation: 1000
+    faiss_indexing: 50000
+  
+  # Checkpoint frequency (items between saves)
+  checkpoint_frequency: 100
+
+# ==========================================
+# Time Windows
+# ==========================================
+
+scheduling:
+  # Preferred GPU usage windows (UTC)
+  preferred_windows:
+    - start: "02:00"
+      end: "06:00"
+      priority: "high"
+      description: "Low traffic period - ideal for batch processing"
+    
+    - start: "14:00"
+      end: "16:00"
+      priority: "medium"
+      description: "Secondary processing window"
+  
+  # Maximum continuous GPU session duration (minutes)
+  max_session_duration: 30
+  
+  # Minimum break between sessions (minutes)
+  min_session_break: 5
+  
+  # Hard stop time (UTC) - no GPU after this time
+  hard_stop_time: "22:00"
+
+# ==========================================
+# Memory Management
+# ==========================================
+
+memory:
+  # Maximum GPU memory to use (percentage)
+  max_gpu_memory_percent: 85
+  
+  # Clear cache frequency (batches)
+  clear_cache_frequency: 10
+  
+  # Enable gradient checkpointing for large models
+  gradient_checkpointing: true
+  
+  # Mixed precision training/inference
+  mixed_precision:
+    enabled: true
+    dtype: "float16"
+  
+  # Offload to CPU when needed
+  cpu_offload:
+    enabled: true
+    threshold_percent: 90
+
+# ==========================================
+# Model Loading
+# ==========================================
+
+model_loading:
+  # Preload models at startup
+  preload_models: false
+  
+  # Model loading priority
+  loading_priority:
+    - "sentence-transformers/all-MiniLM-L6-v2"  # Embeddings
+    - "distilbert-base-uncased"  # Fallback
+  
+  # Unload models after idle period (minutes)
+  unload_after_idle: 15
+  
+  # Maximum models loaded simultaneously
+  max_loaded_models: 2
+
+# ==========================================
+# Emergency Shutdown
+# ==========================================
+
+emergency:
+  # Conditions that trigger emergency shutdown
+  shutdown_triggers:
+    - condition: "gpu_memory_usage > 95%"
+      action: "immediate_shutdown"
+      
+    - condition: "gpu_temperature > 85C"
+      action: "graceful_shutdown"
+      
+    - condition: "daily_quota_exceeded"
+      action: "defer_to_tomorrow"
+      
+    - condition: "error_rate > 10%"
+      action: "pause_and_alert"
+  
+  # Grace period before forced shutdown (seconds)
+  shutdown_grace_period: 30
+  
+  # Save checkpoint before shutdown
+  save_checkpoint_on_shutdown: true
+  
+  # Notification settings
+  notify_on_emergency: true
+
+# ==========================================
+# Fallback Behavior
+# ==========================================
+
+fallback:
+  # When GPU is unavailable or quota exhausted
+  cpu_fallback:
+    enabled: true
+    
+    # Operations that can run on CPU (slower)
+    cpu_allowed_operations:
+      - "faiss_indexing"
+      - "faiss_querying"
+      - "data_preprocessing"
+    
+    # Operations that require GPU (skip if unavailable)
+    gpu_required_operations:
+      - "embedding_generation"
+      - "llm_distillation"
+  
+  # Reduced quality mode (faster, less accurate)
+  reduced_quality_mode:
+    enabled: true
+    trigger: "quota_below_20%"
+    
+    settings:
+      use_smaller_model: true
+      reduce_batch_size: true
+      skip_optional_processing: true
+
+# ==========================================
+# Monitoring & Logging
+# ==========================================
+
+monitoring:
+  # Log GPU usage every N seconds
+  usage_log_interval: 60
+  
+  # Metrics to track
+  tracked_metrics:
+    - "gpu_memory_used"
+    - "gpu_memory_total"
+    - "gpu_utilization"
+    - "gpu_temperature"
+    - "batch_processing_time"
+    - "items_processed"
+    - "quota_remaining"
+  
+  # Alert thresholds
+  alerts:
+    quota_low:
+      threshold: 20
+      message: "GPU quota below 20% - consider deferring non-critical tasks"
+    
+    memory_high:
+      threshold: 85
+      message: "GPU memory usage high - reducing batch size"
+    
+    temperature_high:
+      threshold: 80
+      message: "GPU temperature elevated - cooling period recommended"
+
+# ==========================================
+# Hugging Face Spaces Specific
+# ==========================================
+
+hf_spaces:
+  # Detect HF Spaces environment
+  auto_detect: true
+  
+  # Zero GPU configuration
+  zero_gpu:
+    enabled: true
+    # Maximum duration per call (seconds)
+    max_duration: 60
+    # Queue timeout (seconds)
+    queue_timeout: 120
+  
+  # Persistent storage path
+  persistent_storage: "/data"
+  
+  # Restart handling
+  on_restart:
+    resume_from_checkpoint: true
+    validate_data_integrity: true
+    rebuild_faiss_if_needed: true

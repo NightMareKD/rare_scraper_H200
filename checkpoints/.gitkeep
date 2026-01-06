@@ -1,0 +1,24 @@
+# Checkpoints Directory
+
+This directory contains checkpoint files for pipeline resumability.
+
+## Files
+
+- `scraped_urls.txt` - URLs already scraped (one per line)
+- `normalized_ids.txt` - Case IDs that have been normalized
+- `llm_reviewed_ids.txt` - Case IDs reviewed by LLM for distillation
+- `embedded_ids.txt` - Case IDs with generated embeddings
+- `faiss_version.json` - Current FAISS index version and metadata
+
+## Purpose
+
+These files enable the pipeline to:
+1. Resume from any point after a crash
+2. Avoid reprocessing already-handled items
+3. Track progress across daily runs
+
+## Important
+
+- Never manually modify these files unless recovering from corruption
+- Back up before any manual intervention
+- Files are append-only during normal operation

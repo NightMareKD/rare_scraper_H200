@@ -1,0 +1,241 @@
+# ==========================================
+# Embedding Policy Configuration (FINAL)
+# ==========================================
+# Defines EXACTLY how embeddings are generated and managed.
+# Violations of these rules invalidate the FAISS index.
+# ==========================================
+
+version: "1.0"
+last_updated: "2026-01-06"
+policy_locked: true
+
+# ==========================================
+# Embedding Dimensions (FIXED)
+# ==========================================
+# Each dimension has a separate embedding and FAISS index.
+# Patient queries and database cases MUST use the same model.
+
+dimensions:
+  symptoms:
+    purpose: "Clinical presentation and symptomatology"
+    model: "sentence-transformers/all-MiniLM-L6-v2"
+    vector_size: 384
+    index_file: "data/faiss/symptoms.index"
+    embedding_file: "data/embeddings/symptoms.npy"
+    
+  ecg:
+    purpose: "Electrocardiogram patterns and findings"
+    model: "sentence-transformers/all-MiniLM-L6-v2"
+    vector_size: 384
+    index_file: "data/faiss/ecg.index"
+    embedding_file: "data/embeddings/ecg.npy"
+    
+  labs:
+    purpose: "Laboratory values and biochemical abnormalities"
+    model: "sentence-transformers/all-MiniLM-L6-v2"
+    vector_size: 384
+    index_file: "data/faiss/labs.index"
+    embedding_file: "data/embeddings/labs.npy"
+    
+  demographics:
+    purpose: "Age, sex, and relevant patient context"
+    model: "sentence-transformers/all-MiniLM-L6-v2"
+    vector_size: 384
+    index_file: "data/faiss/demographics.index"
+    embedding_file: "data/embeddings/demographics.npy"
+    
+  imaging:
+    purpose: "Structural imaging findings"
+    model: "sentence-transformers/all-MiniLM-L6-v2"
+    vector_size: 384
+    index_file: "data/faiss/imaging.index"
+    embedding_file: "data/embeddings/imaging.npy"
+
+# ==========================================
+# Embedding Rules (NON-NEGOTIABLE)
+# ==========================================
+
+rules:
+  # Rule 1: Model consistency
+  model_consistency:
+    description: "Same model per dimension FOREVER"
+    enforcement: "Changing model requires full re-embedding"
+    violation_action: "HALT - index invalidation"
+    
+  # Rule 2: Query/database matching
+  query_database_match:
+    description: "Patient queries MUST use same model as database"
+    enforcement: "Model version stored in faiss_version.json"
+    violation_action: "REJECT query"
+    
+  # Rule 3: No mixed embeddings
+  no_mixed_embeddings:
+    description: "Each dimension has exactly one embedding model"
+    enforcement: "Validation on every embedding operation"
+    violation_action: "HALT - data corruption risk"
+    
+  # Rule 4: No retroactive re-embedding
+  no_retroactive:
+    description: "Cannot selectively re-embed existing cases"
+    enforcement: "Re-embedding requires full index rebuild"
+    violation_action: "HALT - consistency violation"
+
+# ==========================================
+# Text Preparation (Per Dimension)
+# ==========================================
+
+text_preparation:
+  symptoms:
+    fields_to_concat:
+      - "chief_complaint"
+      - "presenting_symptoms"
+      - "associated_symptoms"
+      - "symptom_progression"
+    separator: " | "
+    max_length: 1000
+    preprocessing:
+      - "lowercase"
+      - "expand_abbreviations"
+      - "normalize_whitespace"
+      
+  ecg:
+    fields_to_concat:
+      - "rhythm"
+      - "rate"
+      - "intervals"
+      - "st_changes"
+      - "t_wave_changes"
+      - "additional_findings"
+    separator: " | "
+    max_length: 800
+    preprocessing:
+      - "expand_ecg_abbreviations"
+      - "normalize_measurements"
+      
+  labs:
+    fields_to_concat:
+      - "cardiac_biomarkers"
+      - "electrolytes"
+      - "renal_function"
+      - "complete_blood_count"
+      - "coagulation"
+    separator: " | "
+    max_length: 800
+    preprocessing:
+      - "normalize_units"
+      - "flag_abnormal_values"
+      
+  demographics:
+    fields_to_concat:
+      - "age_group"
+      - "sex"
+      - "cardiovascular_risk_factors"
+      - "medical_history"
+    separator: " | "
+    max_length: 500
+    preprocessing:
+      - "standardize_age_groups"
+      
+  imaging:
+    fields_to_concat:
+      - "echocardiogram"
+      - "chest_xray"
+      - "cardiac_mri"
+      - "cardiac_ct"
+    separator: " | "
+    max_length: 800
+    preprocessing:
+      - "normalize_measurements"
+      - "standardize_findings"
+
+# ==========================================
+# Embedding Generation Settings
+# ==========================================
+
+generation:
+  # Batch processing
+  batch_size: 64
+  
+  # Device preference
+  device_preference: "cuda"  # Falls back to CPU if unavailable
+  
+  # Normalization
+  normalize_vectors: true
+  
+  # Storage
+  storage_format: "float32"
+  compression: false
+  
+  # Checksumming
+  compute_checksum: true
+  checksum_algorithm: "sha256"
+
+# ==========================================
+# Embedding Metadata (Per Case)
+# ==========================================
+# Every embedding links to this metadata for audit.
+
+metadata_fields:
+  - field: "case_id"
+    required: true
+    
+  - field: "source_url"
+    required: true
+    
+  - field: "rare_explanation"
+    required: true
+    
+  - field: "clinical_domain"
+    required: true
+    
+  - field: "publication_year"
+    required: false
+    
+  - field: "journal"
+    required: false
+    
+  - field: "embedded_at"
+    required: true
+    auto_generated: true
+    
+  - field: "model_version"
+    required: true
+    auto_generated: true
+
+# ==========================================
+# Validation Checks
+# ==========================================
+
+validation:
+  # Pre-embedding checks
+  pre_embedding:
+    - "Case must be LLM-reviewed (in llm_reviewed_ids)"
+    - "Case must be marked as RARE"
+    - "All required text fields must be non-empty"
+    - "Case must not already be embedded"
+    
+  # Post-embedding checks
+  post_embedding:
+    - "Vector dimension matches expected size"
+    - "Vector is normalized (L2 norm = 1)"
+    - "Metadata is complete"
+    - "Checksum is valid"
+    
+  # On failure
+  failure_action: "Skip case, log error, continue batch"
+
+# ==========================================
+# Model Version Tracking
+# ==========================================
+
+versioning:
+  version_file: "checkpoints/embedding_model_version.json"
+  
+  tracked_info:
+    - model_name
+    - model_version
+    - vector_dimension
+    - first_used_date
+    - total_cases_embedded
+    
+  on_model_change: "HALT - requires full re-embedding decision"

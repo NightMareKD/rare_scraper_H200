@@ -1,0 +1,74 @@
+# ==========================================
+# Clinical Case Similarity System
+# Pinned Dependencies for Reproducibility
+# ==========================================
+
+# Core ML & Embeddings
+torch==2.1.2
+transformers==4.36.2
+sentence-transformers==2.2.2
+
+# Vector Search
+faiss-cpu==1.7.4
+# faiss-gpu==1.7.4  # Uncomment for GPU support
+
+# Data Processing
+numpy==1.26.2
+pandas==2.1.4
+scipy==1.11.4
+
+# Scraping & Web
+requests==2.31.0
+beautifulsoup4==4.12.2
+lxml==5.1.0
+aiohttp==3.9.1
+fake-useragent==1.4.0
+cloudscraper==1.2.71
+
+# Rate Limiting & Retries
+ratelimit==2.2.1
+tenacity==8.2.3
+
+# Configuration
+pyyaml==6.0.1
+python-dotenv==1.0.0
+
+# Logging & Monitoring
+loguru==0.7.2
+rich==13.7.0
+tqdm==4.66.1
+
+# Web Interface (Hugging Face Spaces)
+gradio==4.14.0
+
+# Text Processing
+ftfy==6.1.3
+regex==2023.12.25
+unidecode==1.3.8
+
+# JSON Processing
+orjson==3.9.10
+jsonlines==4.0.0
+
+# Date/Time
+python-dateutil==2.8.2
+
+# File Handling
+chardet==5.2.0
+python-magic==0.4.27
+
+# Testing (dev)
+# pytest==7.4.4
+# pytest-cov==4.1.0
+
+# Type Checking (dev)
+# mypy==1.8.0
+# types-requests==2.31.0.20240106
+# types-PyYAML==6.0.12.12
+
+# ==========================================
+# NOTES:
+# - All versions pinned for reproducibility
+# - faiss-gpu requires CUDA toolkit
+# - Run: pip install -r requirements.txt
+# ==========================================

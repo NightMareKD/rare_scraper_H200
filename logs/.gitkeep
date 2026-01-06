@@ -1,0 +1,22 @@
+# Logs Directory
+
+This directory contains all system logs.
+
+## Log Files
+
+- `ingestion.log` - Main pipeline execution log
+- `normalization.log` - Schema normalization events
+- `gpu_usage.log` - GPU quota tracking (CSV format: date,minutes)
+- `similarity.log` - Query and match events
+- `audit.log` - Clinical audit trail (JSONL format)
+
+## Retention
+
+Logs are retained indefinitely for audit purposes.
+Rotate manually if size becomes an issue.
+
+## Format
+
+Most logs: Standard Python logging format
+`audit.log`: JSON lines, one entry per line
+`gpu_usage.log`: CSV format
